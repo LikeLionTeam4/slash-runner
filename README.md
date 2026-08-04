@@ -1,8 +1,13 @@
-# slash-agent
+# Slash | 로컬 에이전트
 
-Slash 로컬 에이전트. macOS(현재는 Apple Silicon만)에서 상단 메뉴바 아이콘으로 상주하면서, 로컬 PC 정보
-수집(`SYSTEM_STATUS`)과 파일 검색(`FILE_SEARCH`) 작업을 백엔드(`slash-api`)의 요청에 따라 수행하고
-결과를 돌려준다.
+Slash(/)는 자연어 질문과 `/` 슬래시 명령어를 한 입력창에서 처리하는 AI 에이전트 서비스입니다.
+이 저장소는 그중 **사용자 PC에서 동작하는 로컬 에이전트** 파트를 담당합니다.
+
+## 역할
+
+- 사용자 PC 파일 검색
+- 상태 조회
+- 로컬 AI 에이전트 실행 및 결과 전달
 
 ## 구성
 
@@ -192,3 +197,15 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
   등록/검색하는 UI는 아직 없다(추후 `agent-app`에 폴더 선택 기능을 추가해야 한다).
 - 자동 페어링(`obtainPairingCode`)은 `slash-api`의 시험 전용 엔드포인트(`/test/login`)에 의존한다 —
   실제 운영 백엔드에 붙일 때는 `config.json`에 `pairingCode`를 직접 넣어야 한다.
+
+## 관련 저장소
+
+| 저장소 | 역할 |
+|---|---|
+| [slash-web](https://github.com/LikeLionTeam4/slash-web) | 웹 클라이언트 — React·Vite UI, S3/CloudFront 배포 |
+| [slash-api](https://github.com/LikeLionTeam4/slash-api) | 코어 API — 인증, 작업 관리, 실행 위치 결정, DB 연동 |
+| [slash-nlu](https://github.com/LikeLionTeam4/slash-nlu) | 자연어 분석 — slash 명령 파싱, 규칙·Kiwi 의도 분류, 인자 추출 |
+| [slash-llm](https://github.com/LikeLionTeam4/slash-llm) | LLM 서비스 — Gemma 추론, 요약·대화 생성 |
+| **slash-agent** (현재) | 로컬 에이전트 — PC 파일 검색, 상태 조회, 로컬 AI 실행·결과 전달 |
+| [slash-infra](https://github.com/LikeLionTeam4/slash-infra) | 인프라 — Terraform(AWS), Helm·ArgoCD 배포 |
+| [slash-docs](https://github.com/LikeLionTeam4/slash-docs) | 프로젝트 문서 — 아키텍처, API 계약, ERD, 회의록 |
