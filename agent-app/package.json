@@ -1,0 +1,49 @@
+{
+  "name": "@slash-agent/agent-app",
+  "private": true,
+  "version": "0.1.0",
+  "author": "Slash",
+  "description": "Slash 로컬 에이전트 — macOS 메뉴바 실행파일 (Electron 셸 + @slash-agent/contract-agent 번들)",
+  "main": "src/main.cjs",
+  "scripts": {
+    "build:vendor": "cd ../contract-agent && npm run build:bundle && cp dist/index.mjs ../agent-app/vendor/contract-agent.mjs",
+    "start": "npm run build:vendor && electron .",
+    "predist:mac": "npm run build:vendor",
+    "dist:mac": "electron-builder --mac --arm64"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.slash-test.agent",
+    "productName": "Slash Agent",
+    "electronVersion": "43.2.0",
+    "asar": false,
+    "npmRebuild": false,
+    "files": [
+      "src/**/*",
+      "vendor/**/*",
+      "assets/**/*",
+      "!assets/logo_slash.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      { "from": "../fixtures/search-folder", "to": "search-folder" }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/AppIcon.icns",
+      "target": [{ "target": "dir", "arch": ["arm64"] }],
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    }
+  }
+}

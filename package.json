@@ -1,0 +1,13 @@
+{
+  "name": "slash-agent",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "contracts",
+    "contract-agent",
+    "agent-app"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present"
+  }
+}
