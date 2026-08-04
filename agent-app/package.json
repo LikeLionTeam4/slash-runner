@@ -40,7 +40,10 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/AppIcon.icns",
-      "target": [{ "target": "dir", "arch": ["arm64"] }],
+      "target": [
+        { "target": "dir", "arch": ["arm64"] },
+        { "target": "dmg", "arch": ["arm64"] }
+      ],
       "extendInfo": {
         "LSUIElement": true
       }

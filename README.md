@@ -23,6 +23,22 @@ legacy-macos/     (이 저장소에는 포함되지 않음, .gitignore 처리) �
 `agent-app`은 `contract-agent`의 로직을 **그대로 재사용**한다 — GUI는 그 위에 얹은 얇은 껍데기일 뿐,
 WebSocket 프로토콜·인증·작업 실행 코드는 한 곳(`contract-agent/src/`)에만 존재한다.
 
+## 다운로드해서 바로 실행하기 (빌드 없이)
+
+직접 빌드하고 싶지 않으면 [Releases](https://github.com/LikeLionTeam4/slash-agent/releases)에서
+`Slash Agent-x.y.z-arm64.dmg`를 받아서 쓰면 된다 (**Apple Silicon 전용**).
+
+1. dmg 다운로드 후 더블클릭해서 마운트
+2. 열린 창에서 `Slash Agent.app`을 `Applications` 폴더 아이콘 위로 드래그(설치)
+3. `/Applications/Slash Agent.app`을 **더블클릭 대신 우클릭 → 열기**로 첫 실행
+   (서명이 ad-hoc이라 더블클릭하면 "확인되지 않은 개발자" 경고가 뜬다 — 우클릭 → 열기로 한 번만 이렇게
+   하면 그다음부터는 더블클릭해도 된다)
+4. 상단 메뉴바에 Slash 아이콘이 뜨는지 확인. 클릭하면 연결 상태·기기 ID·종료 메뉴가 보인다
+
+실행 자체엔 로컬에 Node.js·Python이 깔려 있는지와 무관하다(Electron이 런타임을 통째로 포함). 다만
+페어링할 백엔드(`slash-api`)가 실행 중이어야 `연결 중...`에서 `READY`로 바뀐다 — 백엔드가 없어도 앱
+자체는 죽지 않고 트레이 아이콘·메뉴는 정상 동작한다.
+
 ## 빌드해서 실행파일 만들기
 
 ```bash
