@@ -25,19 +25,19 @@ WebSocket 프로토콜·인증·작업 실행 코드는 한 곳(`contract-agent/
 
 ## 다운로드해서 바로 실행하기 (빌드 없이)
 
-직접 빌드하고 싶지 않으면 [Releases](https://github.com/LikeLionTeam4/slash-agent/releases)에서
-`Slash Agent-x.y.z-arm64.dmg`를 받아서 쓰면 된다 (**Apple Silicon 전용**).
+직접 빌드하지 않고 사용하려면 [Releases](https://github.com/LikeLionTeam4/slash-agent/releases)에서
+`Slash Agent-x.y.z-arm64.dmg`를 내려받아 실행한다 (**Apple Silicon 전용**).
 
-1. dmg 다운로드 후 더블클릭해서 마운트
-2. 열린 창에서 `Slash Agent.app`을 `Applications` 폴더 아이콘 위로 드래그(설치)
-3. `/Applications/Slash Agent.app`을 **더블클릭 대신 우클릭 → 열기**로 첫 실행
-   (서명이 ad-hoc이라 더블클릭하면 "확인되지 않은 개발자" 경고가 뜬다 — 우클릭 → 열기로 한 번만 이렇게
-   하면 그다음부터는 더블클릭해도 된다)
-4. 상단 메뉴바에 Slash 아이콘이 뜨는지 확인. 클릭하면 연결 상태·기기 ID·종료 메뉴가 보인다
+1. dmg 파일을 다운로드한 뒤 더블클릭해 마운트한다.
+2. 마운트된 창에서 `Slash Agent.app`을 `Applications` 폴더 아이콘 위로 드래그해 설치한다.
+3. `/Applications/Slash Agent.app`을 더블클릭 대신 **우클릭 → 열기**로 처음 실행한다. ad-hoc 서명만
+   적용되어 있어 더블클릭 시 "확인되지 않은 개발자" 경고가 표시된다. 우클릭 → 열기로 최초 1회 실행하면
+   이후에는 더블클릭으로도 실행할 수 있다.
+4. 상단 메뉴바에 Slash 아이콘이 표시되는지 확인한다. 클릭하면 연결 상태, 기기 ID, 종료 메뉴가 나타난다.
 
-실행 자체엔 로컬에 Node.js·Python이 깔려 있는지와 무관하다(Electron이 런타임을 통째로 포함). 다만
-페어링할 백엔드(`slash-api`)가 실행 중이어야 `연결 중...`에서 `READY`로 바뀐다 — 백엔드가 없어도 앱
-자체는 죽지 않고 트레이 아이콘·메뉴는 정상 동작한다.
+실행 자체는 로컬 Node.js·Python 설치 여부와 무관하게 동작한다(Electron이 런타임을 자체 포함). 단, 상태가
+`연결 중...`에서 `READY`로 바뀌려면 페어링 대상 백엔드(`slash-api`)가 실행 중이어야 한다. 백엔드가
+없는 상태에서도 앱은 종료되지 않으며 트레이 아이콘과 메뉴는 정상적으로 동작한다.
 
 ## 빌드해서 실행파일 만들기
 
@@ -52,25 +52,25 @@ npm run dist:mac
   번들링한 뒤(`predist:mac` 훅), Electron으로 `.app`을 패키징한다.
 - **Apple Silicon(arm64) 전용**으로 빌드한다(`electron-builder --mac --arm64`). Intel Mac 빌드는 아직
   시험하지 않았다.
-- Apple Developer ID로 서명하지 않은 상태다(무료 개인 사용 목적). macOS는 arm64 실행파일에 최소한 **ad-hoc
-  서명**은 요구하는데, electron-builder가 별도 인증서를 못 찾으면 보통 자동으로 ad-hoc 서명(`codesign -s -`)을
-  한다. 만약 처음 실행 시 "확인되지 않은 개발자" 경고가 뜨면:
+- Apple Developer ID 서명은 적용되어 있지 않다. macOS는 arm64 실행파일에 최소한 **ad-hoc 서명**을
+  요구하며, electron-builder는 별도 인증서를 찾지 못하면 자동으로 ad-hoc 서명(`codesign -s -`)을
+  적용한다. 처음 실행 시 "확인되지 않은 개발자" 경고가 표시되면 다음과 같이 처리한다:
   ```bash
   xattr -cr "agent-app/dist/mac-arm64/Slash Agent.app"   # 격리 속성 제거
   # 그래도 안 되면 수동 ad-hoc 서명
   codesign --deep --force --sign - "agent-app/dist/mac-arm64/Slash Agent.app"
   ```
   Finder에서는 더블클릭 대신 **우클릭 → 열기**로 처음 한 번 실행하면 이 경고를 건너뛸 수 있다.
-- `package.json`의 `build.npmRebuild`는 반드시 `false`여야 한다. electron-builder는 기본적으로 패키징
-  전에 "production dependencies 재설치" 단계를 도는데, 이 저장소가 npm workspaces 구조라 그 단계가
-  루트에 hoisting된 devDependencies(`app-builder-bin` 포함)를 지워버려서 **electron-builder가 자기
-  자신의 의존성을 삭제해 빌드 도중 `spawn .../app-builder-bin/mac/app-builder_arm64 ENOENT`로 죽는다.**
-  이 앱의 런타임 의존성(`ws`, `zod`)은 순수 JS라 애초에 이 단계 자체가 필요 없다 — 이 옵션을 실수로
-  지우면 다시 겪는다.
+- `package.json`의 `build.npmRebuild`는 반드시 `false`로 유지해야 한다. electron-builder는 기본적으로
+  패키징 전에 "production dependencies 재설치" 단계를 수행하는데, 이 저장소는 npm workspaces 구조이므로
+  해당 단계가 루트에 hoisting된 devDependencies(`app-builder-bin` 포함)를 삭제한다. 그 결과
+  electron-builder가 자신의 의존성을 잃고 빌드 중 `spawn .../app-builder-bin/mac/app-builder_arm64
+  ENOENT` 오류로 실패한다. 이 앱의 런타임 의존성(`ws`, `zod`)은 순수 JS로 작성되어 있어 애초에 이
+  재설치 단계가 불필요하다. 이 옵션 값을 임의로 변경하면 동일한 오류가 재발한다.
 
-**로컬에 Node.js/Python이 설치돼 있는지와 무관하게 실행되는지?** — 그렇다. Electron은 자체 Node.js·Chromium
-런타임을 앱 번들 안에 통째로 포함한다. `.app`을 더블클릭해서 실행하는 순간부터는 시스템에 별도로 Node나
-Python이 깔려 있을 필요가 없다(빌드할 때는 당연히 Node/npm이 필요하지만, 빌드된 결과물 자체는 독립적이다).
+빌드된 실행파일은 로컬 Node.js·Python 설치 여부와 무관하게 동작한다. Electron이 자체 Node.js·Chromium
+런타임을 앱 번들 안에 포함하기 때문이다. `.app` 실행 시점부터는 시스템에 별도로 Node나 Python이 설치되어
+있을 필요가 없다. 단, 빌드 자체는 Node/npm 환경을 필요로 한다.
 
 ## 개발 중 실행 (패키징 없이)
 
@@ -82,16 +82,18 @@ npm run start
 
 ## 설정
 
-Finder에서 더블클릭으로 실행한 앱은 터미널 환경변수를 물려받지 않는다. 그래서 설정은 이 순서로 읽는다:
+Finder에서 더블클릭으로 실행한 앱은 터미널 환경변수를 물려받지 않는다. 이에 따라 설정은 다음 순서로
+적용된다:
 
 1. `~/Library/Application Support/slash-agent-app/config.json`
 2. 환경변수(`CONTRACT_AGENT_API_BASE_URL`, `CONTRACT_AGENT_PAIRING_CODE`, `CONTRACT_AGENT_DEVICE_NAME`,
    `CONTRACT_AGENT_HEARTBEAT_INTERVAL_MS`) — 터미널에서 `npm run start`로 실행할 때 유용
 3. 기본값(`http://localhost:4000`, 자동 페어링)
 
-앱을 처음 실행하면 위 설정 폴더에 `config.example.json`을 자동으로 만들어 둔다. 메뉴의 **"설정 폴더 열기"**로
-Finder에서 바로 찾을 수 있다. `pairingCode`를 안 주면 시험 전용 자동 로그인으로 페어링 코드를 스스로 발급받는다
-(`slash-api`가 `/test/login`, `POST /api/v1/pairing-requests`를 제공할 때만 동작 — 실제 운영 백엔드에는 없다).
+앱을 처음 실행하면 위 설정 폴더에 `config.example.json`을 자동으로 생성한다. 메뉴의 **"설정 폴더 열기"**로
+Finder에서 바로 확인할 수 있다. `pairingCode`를 지정하지 않으면 시험 전용 자동 로그인으로 페어링 코드를
+자동 발급받는다(`slash-api`가 `/test/login`, `POST /api/v1/pairing-requests`를 제공할 때만 동작하며,
+실제 운영 백엔드에는 해당 엔드포인트가 없다).
 
 메뉴바 아이콘 클릭 시 보이는 항목: 상태(연결중/READY/오프라인), 기기 ID, 접속 중인 `slash-api` 주소,
 설정 폴더 열기, 종료. Dock 아이콘은 뜨지 않는다(메뉴바 전용, `LSUIElement`).
@@ -131,9 +133,9 @@ POST /api/v1/agent/sessions/refresh     (Agent → API)
 ```
 
 서명 대상 문자열 = `${deviceId}:${refreshNonce}:${requestedAt}`. `requestedAt`이 서버 기준 ±120초를
-벗어나거나 `refreshNonce`를 재사용하면 거부된다(재전송 공격 방지). 이 저장소의 `contract-agent`는 24시간
-안에 재시작하는 짧은 시험 위주라 이 경로를 실제로 타는 코드는 아직 없다 — `slash-api` 쪽 구현·시험만
-되어 있다.
+벗어나거나 `refreshNonce`를 재사용하면 요청이 거부된다(재전송 공격 방지). 이 저장소의 `contract-agent`는
+24시간 이내에 재시작하는 짧은 시험 시나리오 위주로 운용되어 이 경로를 실행하는 코드는 아직 구현되어
+있지 않다. `slash-api` 쪽 구현·시험은 완료된 상태다.
 
 ### 2) Agent WSS (`/ws/agent`, 접속 후 계속 유지되는 세션)
 
@@ -180,9 +182,10 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
 `payloadSha256`는 존재와 64자리 hex 형식만 검사 대상이다 — 정규화(직렬화) 알고리즘이 아직 백엔드와
 합의되지 않아서, 인증 서명이나 무결성 증명으로 취급하지 않는다.
 
-### 3) 지금 이 Agent가 실제로 처리하는 작업
+### 3) 현재 이 Agent가 처리하는 작업
 
-이 Agent는 P0 두 가지만 실행하고 나머지 `taskType`은 `TASK_TYPE_NOT_SUPPORTED`로 거절한다.
+이 Agent는 P0로 지정된 두 가지 작업만 실행하며, 그 외의 `taskType`은 `TASK_TYPE_NOT_SUPPORTED`로
+거부한다.
 
 - **`SYSTEM_STATUS`**: 이 Mac의 실제 `os.loadavg()`/`os.totalmem()`/`os.freemem()`, `df -k /`(디스크)를
   읽어 `{cpuPercent, memoryPercent, memoryTotalMb, memoryUsedMb, diskPercent, diskTotalMb, diskUsedMb,
@@ -202,8 +205,8 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
   재전송한다.
 
 전체 스키마 정의는 `contracts/src/agentMessages.ts`·`contracts/src/restApi.ts`(zod), 실제 구현은
-`contract-agent/src/agent.ts`를 참고. 실제로 오가는 JSON 예시는 [`docs/MESSAGE_GUIDE.md`](docs/MESSAGE_GUIDE.md)에
-정리해 뒀다.
+`contract-agent/src/agent.ts`를 참고한다. 실제로 오가는 JSON 예시는
+[`docs/MESSAGE_GUIDE.md`](docs/MESSAGE_GUIDE.md)에 정리되어 있다.
 
 ## 알려진 한계
 
