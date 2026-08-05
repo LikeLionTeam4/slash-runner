@@ -22,7 +22,8 @@ import { searchFiles } from "./fileSearch.js";
 import { randomUUID } from "node:crypto";
 
 export const SEARCH_FOLDER_ID = "sf-fixtures-01";
-export const SUPPORTED_TASK_TYPES: TaskType[] = ["FILE_SEARCH", "SYSTEM_STATUS"];
+// COMMAND는 slash-*-test 브랜치 전용 임시 TaskType이다 (contracts/src/enums.ts 주석 참고).
+export const SUPPORTED_TASK_TYPES: TaskType[] = ["FILE_SEARCH", "SYSTEM_STATUS", "COMMAND"];
 
 export interface ContractAgentOptions {
   apiBaseUrl: string;
@@ -373,6 +374,10 @@ export class ContractAgent {
       if (typeof query !== "string" || query.length === 0) return "INVALID_PARAMETERS";
       if (searchFolderId !== SEARCH_FOLDER_ID) return "SEARCH_FOLDER_NOT_FOUND";
     }
+    if (message.taskType === "COMMAND") {
+      const command = message.parameters.command;
+      if (typeof command !== "string" || command.length === 0) return "INVALID_PARAMETERS";
+    }
     return null;
   }
 
@@ -388,6 +393,11 @@ export class ContractAgent {
       if (message.taskType === "FILE_SEARCH") {
         const query = String(message.parameters.query ?? "");
         return { ok: true, result: { ...searchFiles(this.options.searchFolderRoot, query) } };
+      }
+      if (message.taskType === "COMMAND") {
+        // 백그라운드 명령 실행의 최소 구현 — 지금은 받은 명령을 그대로 에코한다.
+        const command = String(message.parameters.command ?? "");
+        return { ok: true, result: { output: command, executedAt: nowIsoKst() } };
       }
       return {
         ok: false,
