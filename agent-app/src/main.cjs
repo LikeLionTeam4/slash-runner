@@ -64,6 +64,27 @@ function createIdentityStore() {
   };
 }
 
+// processed_tasks: 자격 증명 아님, 서버에 이미 전송된 결과값
+// → 안전 저장소 불필요, 평문 JSON 파일로 충분
+const PROCESSED_TASKS_PATH = join(CONFIG_DIR, "processed-tasks.json");
+
+function createProcessedTaskStore() {
+  return {
+    async load() {
+      if (!existsSync(PROCESSED_TASKS_PATH)) return {};
+      try {
+        return JSON.parse(readFileSync(PROCESSED_TASKS_PATH, "utf8"));
+      } catch (error) {
+        console.error("처리 이력 파일 파싱 실패, 무시하고 진행:", error);
+        return {};
+      }
+    },
+    async save(records) {
+      writeFileSync(PROCESSED_TASKS_PATH, JSON.stringify(records));
+    },
+  };
+}
+
 /**
  * Finder에서 더블클릭으로 켠 앱은 터미널 환경변수를 물려받지 않는다. 그래서 설정은
  * (1) ~/Library/Application Support/slash-agent-app/config.json → (2) 환경변수 → (3) 기본값
@@ -162,6 +183,7 @@ async function startAgent() {
 
   currentConfig = loadConfig();
   const identityStore = createIdentityStore();
+  const processedTaskStore = createProcessedTaskStore();
   // 저장된 기기 식별 정보가 있으면 페어링 코드 없이도 시작할 수 있다(agent.ts가 재페어링 대신
   // 토큰 갱신을 시도한다) — 갱신까지 실패할 때만 아래 pairingCode가 실제로 필요해진다.
   const hasPersistedIdentity = (await identityStore.load()) !== null;
@@ -176,6 +198,7 @@ async function startAgent() {
     heartbeatIntervalMs: currentConfig.heartbeatIntervalMs,
     log: (line) => console.log(line),
     identityStore,
+    processedTaskStore,
   });
 
   try {
@@ -193,6 +216,7 @@ async function startAgent() {
       heartbeatIntervalMs: currentConfig.heartbeatIntervalMs,
       log: (line) => console.log(line),
       identityStore,
+      processedTaskStore,
     });
     await agent.start();
   }
