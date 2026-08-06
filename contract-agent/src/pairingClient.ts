@@ -3,6 +3,8 @@ import {
   AgentPairResponse,
   AgentPairVerifyRequest,
   AgentPairVerifyResponse,
+  AgentSessionRefreshRequest,
+  AgentSessionRefreshResponse,
   TaskType,
   DeviceOs,
 } from "@slash-agent/contracts";
@@ -16,10 +18,10 @@ export interface PairAgentParams {
 }
 
 /** 페어링 REST 응답은 {data,meta} 봉투를 쓴다 (메시지 프로토콜 문서 §3.3). */
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function postJson<T>(url: string, body: unknown, headers?: Record<string, string>): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   const parsed = (await res.json().catch(() => null)) as { data: T } | { error: { code: string; message: string } } | null;
@@ -51,4 +53,15 @@ export async function verifyPairing(
   body: AgentPairVerifyRequest
 ): Promise<AgentPairVerifyResponse> {
   return postJson<AgentPairVerifyResponse>(`${apiBaseUrl}/api/v1/agent/pair/verify`, body);
+}
+
+/** 재페어링 없이 기기 인증 토큰만 갱신한다 (메시지 프로토콜 문서 §8.1 3단계). */
+export async function refreshSession(
+  apiBaseUrl: string,
+  currentDeviceToken: string,
+  body: AgentSessionRefreshRequest
+): Promise<AgentSessionRefreshResponse> {
+  return postJson<AgentSessionRefreshResponse>(`${apiBaseUrl}/api/v1/agent/sessions/refresh`, body, {
+    Authorization: `Bearer ${currentDeviceToken}`,
+  });
 }

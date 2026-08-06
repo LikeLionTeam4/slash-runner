@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign as cryptoSign, KeyObject } from "node:crypto";
+import { generateKeyPairSync, createPrivateKey, sign as cryptoSign, KeyObject } from "node:crypto";
 
 export interface AgentKeyPair {
   publicKeyBase64: string;
@@ -16,4 +16,15 @@ export function generateAgentKeyPair(): AgentKeyPair {
 export function signPayload(privateKey: KeyObject, payload: string): string {
   const signature = cryptoSign(null, Buffer.from(payload), privateKey);
   return signature.toString("base64");
+}
+
+/** 영속 저장용으로 개인키를 PKCS8 PEM 문자열로 직렬화한다. */
+export function exportPrivateKeyPem(privateKey: KeyObject): string {
+  return privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+}
+
+/** 저장소에서 불러온 PEM + publicKeyBase64로 키쌍을 복원한다(재페어링 없이 재시작하기 위함). */
+export function restoreAgentKeyPair(privateKeyPem: string, publicKeyBase64: string): AgentKeyPair {
+  const privateKey = createPrivateKey(privateKeyPem);
+  return { publicKeyBase64, privateKey };
 }

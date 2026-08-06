@@ -13,10 +13,12 @@ import {
   ResultMessage,
   ProgressMessage,
   buildChallengeSigningPayload,
+  buildRefreshSigningPayload,
   nowIsoKst,
 } from "@slash-agent/contracts";
-import { generateAgentKeyPair, signPayload } from "./agentCrypto.js";
-import { pairAgent, verifyPairing } from "./pairingClient.js";
+import { AgentKeyPair, generateAgentKeyPair, restoreAgentKeyPair, exportPrivateKeyPem, signPayload } from "./agentCrypto.js";
+import { pairAgent, verifyPairing, refreshSession } from "./pairingClient.js";
+import { AgentIdentityStore } from "./agentIdentityStore.js";
 import { collectSystemStatus } from "./systemStatus.js";
 import { searchFiles } from "./fileSearch.js";
 import { randomUUID } from "node:crypto";
@@ -35,6 +37,12 @@ export interface ContractAgentOptions {
   /** 시험 전용: 이미 발급된 deviceId/deviceToken을 직접 주입해 HTTP 페어링 단계를 생략한다. */
   presetDeviceId?: string;
   presetDeviceToken?: string;
+  /**
+   * 기기 식별 정보(개인키·deviceId·deviceToken) 영속화 저장소. 주어지면 시작 시 저장된 값을
+   * 우선 불러와 재페어링 대신 토큰 갱신(§8.1 3단계)을 시도하고, 페어링·갱신에 성공할 때마다
+   * 최신 값을 다시 저장한다. 생략하면 매 실행마다 새 키로 재페어링한다(기존 동작 유지).
+   */
+  identityStore?: AgentIdentityStore;
 }
 
 interface CachedDispatchResult {
@@ -54,11 +62,12 @@ interface ResolvedContractAgentOptions {
   log: (line: string) => void;
   presetDeviceId?: string;
   presetDeviceToken?: string;
+  identityStore?: AgentIdentityStore;
 }
 
 export class ContractAgent {
   private readonly options: ResolvedContractAgentOptions;
-  private readonly keyPair = generateAgentKeyPair();
+  private keyPair: AgentKeyPair = generateAgentKeyPair();
   private socket: WebSocket | null = null;
   private deviceId: string | null = null;
   private deviceToken: string | null = null;
@@ -81,6 +90,7 @@ export class ContractAgent {
       log: options.log ?? (() => {}),
       presetDeviceId: options.presetDeviceId,
       presetDeviceToken: options.presetDeviceToken,
+      identityStore: options.identityStore,
     };
     if (options.presetDeviceId && options.presetDeviceToken) {
       this.deviceId = options.presetDeviceId;
@@ -97,6 +107,7 @@ export class ContractAgent {
   }
 
   async start(): Promise<void> {
+    await this.loadPersistedIdentity();
     await this.pairIfNeeded();
     void this.connectionLoop();
   }
@@ -123,8 +134,64 @@ export class ContractAgent {
     this.options.log(`[contract-agent] ${line}`);
   }
 
+  /** 저장소에 남아있는 기기 식별 정보를 불러온다. preset이 이미 주어졌다면 그쪽을 우선한다. */
+  private async loadPersistedIdentity(): Promise<void> {
+    if (this.deviceToken || !this.options.identityStore) return;
+    const persisted = await this.options.identityStore.load();
+    if (!persisted) return;
+    this.keyPair = restoreAgentKeyPair(persisted.privateKeyPem, persisted.publicKeyBase64);
+    this.deviceId = persisted.deviceId;
+    this.deviceToken = persisted.deviceToken;
+    this.log(`저장된 기기 ID를 불러왔습니다 deviceId=${this.deviceId}`);
+  }
+
+  private async persistIdentity(): Promise<void> {
+    if (!this.options.identityStore || !this.deviceId || !this.deviceToken) return;
+    await this.options.identityStore.save({
+      deviceId: this.deviceId,
+      deviceToken: this.deviceToken,
+      privateKeyPem: exportPrivateKeyPem(this.keyPair.privateKey),
+      publicKeyBase64: this.keyPair.publicKeyBase64,
+    });
+  }
+
+  /**
+   * 이미 등록된 기기라면 재페어링 대신 토큰 갱신을 시도한다(메시지 프로토콜 문서 §8.1 3단계).
+   * 서버가 갱신 엔드포인트를 아직 지원하지 않거나(404), 기기가 등록 해제됐거나, 서명 검증에
+   * 실패하면 false를 반환해 호출부가 재페어링으로 넘어가게 한다.
+   */
+  private async tryRefreshSession(): Promise<boolean> {
+    if (!this.deviceId || !this.deviceToken) return false;
+    try {
+      const refreshNonce = randomUUID();
+      const requestedAt = nowIsoKst();
+      const signature = signPayload(
+        this.keyPair.privateKey,
+        buildRefreshSigningPayload({ deviceId: this.deviceId, refreshNonce, requestedAt })
+      );
+      const response = await refreshSession(this.options.apiBaseUrl, this.deviceToken, {
+        deviceId: this.deviceId,
+        refreshNonce,
+        requestedAt,
+        signature,
+      });
+      this.deviceToken = response.deviceToken;
+      this.log(`기기 인증 토큰을 갱신했습니다 deviceId=${this.deviceId}`);
+      await this.persistIdentity();
+      return true;
+    } catch (error) {
+      this.log(`토큰 갱신 실패, 재페어링으로 전환합니다: ${String(error)}`);
+      return false;
+    }
+  }
+
   private async pairIfNeeded(): Promise<void> {
-    if (this.deviceToken) return;
+    if (this.deviceToken && this.deviceId) {
+      if (await this.tryRefreshSession()) return;
+      this.deviceId = null;
+      this.deviceToken = null;
+      await this.options.identityStore?.clear();
+    }
     if (!this.options.pairingCode) {
       throw new Error("pairingCode 또는 presetDeviceId/presetDeviceToken 중 하나는 반드시 필요합니다.");
     }
@@ -151,6 +218,7 @@ export class ContractAgent {
     this.deviceId = pairResponse.deviceId;
     this.deviceToken = verifyResponse.deviceToken;
     this.log(`페어링 완료 deviceId=${this.deviceId}`);
+    await this.persistIdentity();
   }
 
   private async connectionLoop(): Promise<void> {
