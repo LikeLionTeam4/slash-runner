@@ -19,9 +19,13 @@ import {
 import { AgentKeyPair, generateAgentKeyPair, restoreAgentKeyPair, exportPrivateKeyPem, signPayload } from "./agentCrypto.js";
 import { pairAgent, verifyPairing, refreshSession } from "./pairingClient.js";
 import { AgentIdentityStore } from "./agentIdentityStore.js";
+import { CachedDispatchResult, ProcessedTaskStore } from "./processedTaskStore.js";
 import { collectSystemStatus } from "./systemStatus.js";
 import { searchFiles } from "./fileSearch.js";
 import { randomUUID } from "node:crypto";
+
+/** RESULT_ACK 수신 후 재수신 대비 보관 기간 */
+const PROCESSED_TASK_RETENTION_MS = 60 * 60_000;
 
 export const SEARCH_FOLDER_ID = "sf-fixtures-01";
 export const SUPPORTED_TASK_TYPES: TaskType[] = ["FILE_SEARCH", "SYSTEM_STATUS"];
@@ -43,12 +47,13 @@ export interface ContractAgentOptions {
    * 최신 값을 다시 저장한다. 생략하면 매 실행마다 새 키로 재페어링한다(기존 동작 유지).
    */
   identityStore?: AgentIdentityStore;
-}
-
-interface CachedDispatchResult {
-  ack: Omit<AckMessage, "schemaVersion" | "eventId" | "sentAt">;
-  result: Omit<ResultMessage, "schemaVersion" | "eventId" | "sentAt">;
-  acked: boolean;
+  /**
+   * 중복방지·재전송 이력(processed_tasks) 영속화 저장소
+   * - 시작 시 저장된 이력 로드
+   * - 처리 결과 변경 시(TASK 완료, RESULT_ACK 수신) 재저장
+   * - 생략 시 메모리 전용, 재시작 시 소실(기존 동작)
+   */
+  processedTaskStore?: ProcessedTaskStore;
 }
 
 export type ContractAgentState = "CONNECTING" | "AUTHENTICATING" | "READY" | "OFFLINE" | "STOPPED";
@@ -63,6 +68,7 @@ interface ResolvedContractAgentOptions {
   presetDeviceId?: string;
   presetDeviceToken?: string;
   identityStore?: AgentIdentityStore;
+  processedTaskStore?: ProcessedTaskStore;
 }
 
 export class ContractAgent {
@@ -91,6 +97,7 @@ export class ContractAgent {
       presetDeviceId: options.presetDeviceId,
       presetDeviceToken: options.presetDeviceToken,
       identityStore: options.identityStore,
+      processedTaskStore: options.processedTaskStore,
     };
     if (options.presetDeviceId && options.presetDeviceToken) {
       this.deviceId = options.presetDeviceId;
@@ -108,6 +115,7 @@ export class ContractAgent {
 
   async start(): Promise<void> {
     await this.loadPersistedIdentity();
+    await this.loadPersistedResultCache();
     await this.pairIfNeeded();
     void this.connectionLoop();
   }
@@ -153,6 +161,30 @@ export class ContractAgent {
       privateKeyPem: exportPrivateKeyPem(this.keyPair.privateKey),
       publicKeyBase64: this.keyPair.publicKeyBase64,
     });
+  }
+
+  private async loadPersistedResultCache(): Promise<void> {
+    if (!this.options.processedTaskStore) return;
+    const records = await this.options.processedTaskStore.load();
+    for (const [key, value] of Object.entries(records)) this.resultCache.set(key, value);
+    this.pruneResultCache();
+    if (this.resultCache.size > 0) this.log(`저장된 처리 이력 ${this.resultCache.size}건을 불러왔습니다`);
+  }
+
+  /** RESULT_ACK 완료 후 일정 시간 경과 항목 정리 — 무한 누적 방지 */
+  private pruneResultCache(): void {
+    const now = Date.now();
+    for (const [key, cached] of this.resultCache) {
+      if (cached.acked && now - Date.parse(cached.completedAt) > PROCESSED_TASK_RETENTION_MS) {
+        this.resultCache.delete(key);
+      }
+    }
+  }
+
+  private async persistResultCache(): Promise<void> {
+    if (!this.options.processedTaskStore) return;
+    this.pruneResultCache();
+    await this.options.processedTaskStore.save(Object.fromEntries(this.resultCache));
   }
 
   /**
@@ -340,7 +372,10 @@ export class ContractAgent {
       case "RESULT_ACK": {
         const key = `${message.taskId}:${message.dispatchId}`;
         const cached = this.resultCache.get(key);
-        if (cached) cached.acked = true;
+        if (cached) {
+          cached.acked = true;
+          void this.persistResultCache();
+        }
         return;
       }
       case "PROTOCOL_ERROR": {
@@ -428,7 +463,8 @@ export class ContractAgent {
       startedAt,
       finishedAt,
     };
-    this.resultCache.set(key, { ack, result, acked: false });
+    this.resultCache.set(key, { ack, result, acked: false, completedAt: finishedAt });
+    void this.persistResultCache();
     this.send(socket, result);
   }
 

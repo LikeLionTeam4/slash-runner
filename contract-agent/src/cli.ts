@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "
 import { homedir } from "node:os";
 import { ContractAgent } from "./agent.js";
 import type { AgentIdentityStore } from "./agentIdentityStore.js";
+import type { ProcessedTaskStore } from "./processedTaskStore.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,26 @@ function createDevIdentityStore(): AgentIdentityStore {
   };
 }
 
+/** 처리 이력 — 자격 증명 아님, 평문 파일로 충분 */
+function createDevProcessedTaskStore(): ProcessedTaskStore {
+  const dir = join(homedir(), ".slash-contract-agent");
+  const path = join(dir, "processed-tasks.json");
+  return {
+    async load() {
+      if (!existsSync(path)) return {};
+      try {
+        return JSON.parse(readFileSync(path, "utf8"));
+      } catch {
+        return {};
+      }
+    },
+    async save(records) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path, JSON.stringify(records, null, 2));
+    },
+  };
+}
+
 async function obtainPairingCode(apiBaseUrl: string): Promise<string> {
   const explicit = process.env.CONTRACT_AGENT_PAIRING_CODE;
   if (explicit) return explicit;
@@ -60,6 +81,7 @@ async function main(): Promise<void> {
   const apiBaseUrl = process.env.CONTRACT_AGENT_API_BASE_URL ?? "http://localhost:4000";
   const searchFolderRoot = resolve(__dirname, "../../fixtures/search-folder");
   const identityStore = createDevIdentityStore();
+  const processedTaskStore = createDevProcessedTaskStore();
   const hasPersistedIdentity = (await identityStore.load()) !== null;
   // 저장된 기기 식별 정보가 있으면 매 실행마다 페어링 코드를 새로 받지 않는다 — agent.ts가
   // 재페어링 대신 토큰 갱신을 먼저 시도한다.
@@ -73,6 +95,7 @@ async function main(): Promise<void> {
     heartbeatIntervalMs: Number(process.env.CONTRACT_AGENT_HEARTBEAT_INTERVAL_MS ?? 30_000),
     log: (line) => console.log(line),
     identityStore,
+    processedTaskStore,
   });
 
   await agent.start();
