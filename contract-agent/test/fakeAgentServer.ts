@@ -64,6 +64,8 @@ export interface FakeAgentServer {
   receivedMessages: AgentMessage[];
   /** READY 도달 횟수 — 재연결 여부 확인용. */
   readyCount: number;
+  /** 지정 시 이 코드만 페어링 성공, 나머지는 PAIRING_CODE_INVALID(기본 undefined = 전부 허용) */
+  acceptedPairingCode: string | undefined;
   close(): Promise<void>;
 }
 
@@ -75,7 +77,7 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
   let currentSocket: WebSocket | null = null;
   let currentDeviceId: string | null = null;
   let readyCount = 0;
-  const state = { autoAckResult: true };
+  const state = { autoAckResult: true, acceptedPairingCode: undefined as string | undefined };
 
   function notifyWaiters(message: AgentMessage): void {
     const idx = waiters.findIndex((w) => w.type === message.type);
@@ -110,6 +112,10 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
     };
 
     if (url === "/api/v1/agent/pair") {
+      if (state.acceptedPairingCode !== undefined && body.pairingCode !== state.acceptedPairingCode) {
+        fail(422, "PAIRING_CODE_INVALID", "등록 코드가 올바르지 않습니다");
+        return;
+      }
       const deviceId = randomUUID();
       devices.set(deviceId, { deviceId, publicKeyBase64: body.publicKey, deviceToken: "", revoked: false });
       const pairingSessionId = randomUUID();
@@ -217,6 +223,12 @@ export async function startFakeAgentServer(): Promise<FakeAgentServer> {
     },
     set autoAckResult(value: boolean) {
       state.autoAckResult = value;
+    },
+    get acceptedPairingCode() {
+      return state.acceptedPairingCode;
+    },
+    set acceptedPairingCode(value: string | undefined) {
+      state.acceptedPairingCode = value;
     },
     sendTask({ taskId, dispatchId, taskType, parameters }) {
       if (!currentSocket) throw new Error("연결된 에이전트 소켓이 없습니다");
