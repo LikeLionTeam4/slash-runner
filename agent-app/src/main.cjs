@@ -13,8 +13,8 @@
 // 그 링크가 원본 저장소 경로를 벗어나지 못해 "빌드된 .app만 다른 곳으로 옮기면 깨지는" 문제가
 // 생긴다. 번들을 이 앱 안에 실제 파일로 넣어두면 그 문제가 없다. 순수 ESM 파일이라 동적
 // `import()`로 불러온다(CJS에서 ESM을 부르는 건 Node가 공식 지원한다).
-const { app, Tray, Menu, nativeImage, shell } = require("electron");
-const { readFileSync, writeFileSync, existsSync, mkdirSync } = require("node:fs");
+const { app, Tray, Menu, nativeImage, shell, safeStorage } = require("electron");
+const { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } = require("node:fs");
 const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { homedir } = require("node:os");
@@ -25,6 +25,44 @@ app.dock?.hide();
 const CONFIG_DIR = join(homedir(), "Library", "Application Support", "slash-agent-app");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 const CONFIG_EXAMPLE_PATH = join(CONFIG_DIR, "config.example.json");
+// 개인키·deviceToken은 config.json과 분리해서 암호화된 채로만 저장한다 — 평문 설정 파일에는
+// 절대 안 남긴다 (메시지 프로토콜 문서 §8.1 3단계: "SQLite·설정 파일·로그에는 기록하지 않는다").
+const IDENTITY_PATH = join(CONFIG_DIR, "identity.enc");
+
+/**
+ * macOS Keychain(safeStorage가 내부적으로 사용)으로 암호화한 뒤에만 디스크에 쓴다.
+ * safeStorage.encryptString은 OS 키체인에 보관된 앱별 키로 암호화한 바이너리를 반환하므로,
+ * 파일 자체(identity.enc)가 유출돼도 같은 macOS 사용자 계정 밖에서는 복호화할 수 없다.
+ */
+function createIdentityStore() {
+  return {
+    async load() {
+      if (!existsSync(IDENTITY_PATH)) return null;
+      if (!safeStorage.isEncryptionAvailable()) {
+        console.error("OS 보안 저장소를 사용할 수 없어 저장된 기기 식별 정보를 무시합니다.");
+        return null;
+      }
+      try {
+        const encrypted = readFileSync(IDENTITY_PATH);
+        return JSON.parse(safeStorage.decryptString(encrypted));
+      } catch (error) {
+        console.error("기기 식별 정보 복호화 실패, 무시하고 재등록합니다:", error);
+        return null;
+      }
+    },
+    async save(identity) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        console.error("OS 보안 저장소를 사용할 수 없어 기기 식별 정보를 저장하지 못했습니다.");
+        return;
+      }
+      const encrypted = safeStorage.encryptString(JSON.stringify(identity));
+      writeFileSync(IDENTITY_PATH, encrypted);
+    },
+    async clear() {
+      if (existsSync(IDENTITY_PATH)) unlinkSync(IDENTITY_PATH);
+    },
+  };
+}
 
 /**
  * Finder에서 더블클릭으로 켠 앱은 터미널 환경변수를 물려받지 않는다. 그래서 설정은
@@ -123,7 +161,12 @@ async function startAgent() {
   const { ContractAgent } = await import(pathToFileURL(vendorPath).href);
 
   currentConfig = loadConfig();
-  const pairingCode = currentConfig.pairingCode ?? (await obtainPairingCode(currentConfig.apiBaseUrl));
+  const identityStore = createIdentityStore();
+  // 저장된 기기 식별 정보가 있으면 페어링 코드 없이도 시작할 수 있다(agent.ts가 재페어링 대신
+  // 토큰 갱신을 시도한다) — 갱신까지 실패할 때만 아래 pairingCode가 실제로 필요해진다.
+  const hasPersistedIdentity = (await identityStore.load()) !== null;
+  const pairingCode =
+    currentConfig.pairingCode ?? (hasPersistedIdentity ? undefined : await obtainPairingCode(currentConfig.apiBaseUrl));
 
   agent = new ContractAgent({
     apiBaseUrl: currentConfig.apiBaseUrl,
@@ -132,9 +175,27 @@ async function startAgent() {
     deviceName: currentConfig.deviceName,
     heartbeatIntervalMs: currentConfig.heartbeatIntervalMs,
     log: (line) => console.log(line),
+    identityStore,
   });
 
-  await agent.start();
+  try {
+    await agent.start();
+  } catch (error) {
+    // 저장된 식별 정보로 토큰 갱신까지 실패했는데 pairingCode도 없었던 경우(드묾) —
+    // 새 등록 코드를 받아 한 번만 새로 페어링을 시도한다.
+    if (pairingCode || !hasPersistedIdentity) throw error;
+    console.error("저장된 기기로 재개하지 못해 새로 페어링합니다:", error);
+    agent = new ContractAgent({
+      apiBaseUrl: currentConfig.apiBaseUrl,
+      pairingCode: await obtainPairingCode(currentConfig.apiBaseUrl),
+      searchFolderRoot: resolveSearchFolderRoot(),
+      deviceName: currentConfig.deviceName,
+      heartbeatIntervalMs: currentConfig.heartbeatIntervalMs,
+      log: (line) => console.log(line),
+      identityStore,
+    });
+    await agent.start();
+  }
   refreshMenu();
   agent.waitUntilReady(20_000).then(refreshMenu, () => refreshMenu());
 }
