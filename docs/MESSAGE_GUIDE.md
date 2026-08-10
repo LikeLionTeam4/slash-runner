@@ -1,4 +1,4 @@
-# 메시지 송수신 가이드 — 이 Agent(`contract-agent`)에게 뭘 보내면 뭐가 오는가
+# 메시지 송수신 가이드 — 이 Agent(`slash_agent`, Python 구현)에게 뭘 보내면 뭐가 오는가
 
 이 문서는 다른 팀원이 이 Agent(또는 이 Agent가 구현한 것과 같은 계약을 따르는 실제 PC Agent)와
 연동할 때 "무엇을 보내면 무엇이 돌아오는지"를 실제로 검증된 예시로 보여주는 실전 가이드다.
@@ -6,7 +6,7 @@
 여기서는 반복하지 않는다 — 여기는 **실제로 주고받는 JSON 그대로**를 보여주는 데 집중한다.
 
 기준 문서: `260804-1123_SLASH-메시지프로토콜.md`(이하 "프로토콜 문서"). 이 저장소의 `slash-api/mock-api`,
-`slash-agent/contract-agent`는 이 프로토콜 문서 기준으로 리팩터링·검증되어 있다(24/24 자동 시험 통과).
+`slash-agent/slash-python-agent`는 이 프로토콜 문서 기준으로 구현·검증되어 있다.
 
 ## 0. 큰 그림
 
@@ -27,9 +27,9 @@ Agent 사이에서 자동으로 일어난다. 그래서 이 문서는 REST 경�
 # 터미널 1 — slash-api
 npx tsx slash-api/mock-api/src/server.ts
 
-# 터미널 2 — Agent (contract-agent)
-cd slash-agent/contract-agent && npm run start
-# 콘솔에 "[contract-agent] 자동 발급된 페어링 코드: NNNNNN" → "READY (deviceId=...)" 가 뜨면 준비된 것
+# 터미널 2 — Agent (slash_agent, Python)
+cd slash-agent/slash-python-agent && python -m slash_agent.cli
+# 콘솔에 "[slash-agent] 자동 발급된 페어링 코드: NNNNNN" → "READY (deviceId=...)" 가 뜨면 준비된 것
 ```
 
 아래 모든 예시는 이렇게 띄운 상태에서 그대로 복사해서 실행할 수 있다.
@@ -253,7 +253,7 @@ WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EXPIRED, POLICY_DENIED`)이
 curl -s -X POST http://localhost:4000/api/v1/pairing-requests -H "Authorization: Bearer $TOKEN"
 # → {"data":{"pairingRequestId":"...","pairingCode":"483921","expiresAt":"..."},"meta":{...}}
 
-# 2) Agent가 그 코드로 등록 (contract-agent가 자동으로 다 한다 — 아래는 내부적으로 벌어지는 일)
+# 2) Agent가 그 코드로 등록 (slash_agent가 자동으로 다 한다 — 아래는 내부적으로 벌어지는 일)
 POST /api/v1/agent/pair       { pairingCode, publicKey, device, supportedTaskTypes }
   → { pairingSessionId, deviceId, challengeId, nonce, expiresAt }
 POST /api/v1/agent/pair/verify { pairingSessionId, challengeId, signature(Ed25519) }
@@ -265,8 +265,8 @@ POST /api/v1/agent/pair/verify { pairingSessionId, challengeId, signature(Ed2551
 
 `deviceToken` 갱신(`POST /api/v1/agent/sessions/refresh`)은 기존 토큰을 다시 제시하는 방식이
 **아니다** — 매번 새 `refreshNonce`에 대해 Ed25519로 다시 서명해야 한다(`deviceId:refreshNonce:requestedAt`).
-이 Simulator는 24시간짜리 토큰을 갱신할 만큼 오래 켜두고 시험하지 않아 실제로 이 경로를 타는 코드는
-없지만, `slash-api` 쪽 엔드포인트는 구현·시험되어 있다.
+저장된 기기 식별 정보(Keychain)가 있으면 재시작할 때마다 재페어링 대신 이 경로부터 시도하고,
+서버가 기기를 못 찾거나(`AUTH_REQUIRED`) 서명 검증에 실패하면 재페어링으로 폴백한다.
 
 ## 5. "Agent가 왜 이렇게 답했는지" 확인하는 법
 
@@ -289,10 +289,9 @@ curl -s http://localhost:4000/api/v1/tasks/{taskId}/events -H "Authorization: Be
 필드(`source`/`eventType`)를 사람이 읽기 쉬운 문자열로 접어 넣은 것이다. 실패한 Task라면
 `reasonCode`에 그 시점의 `errorCode`가 채워진다.
 
-## 6. 참고: `slash-web` 없이 이 전체를 눈으로 보고 싶다면
+## 6. 참고: `slash-web` 화면으로 이 전체를 눈으로 보고 싶다면
 
-```bash
-npm run start:test   # mock-api + contract-agent + slash-web dev 서버를 한 번에 띄운다
-```
-그다음 `http://localhost:5173`에서 로그인 → PC 등록 코드 발급 → `/status`, `/file 프로젝트` 등을
+mock-api(`npx tsx slash-api/mock-api/src/server.ts`), 이 Agent(`python -m slash_agent.cli` 또는
+트레이 앱 `python -m slash_agent.tray_app`), `slash-web`(`npm run dev`) 셋을 각자 띄운 뒤
+`http://localhost:5173`에서 로그인 → PC 등록 코드 발급 → `/status`, `/file 프로젝트` 등을
 직접 입력해보면, 위에서 curl로 본 것과 같은 왕복이 화면의 "통합 흐름" 패널에 그대로 뜬다.
