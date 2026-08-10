@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>색인 폴더 관리</title>
+<style>
+  :root {
+    /* slash-web DESIGN.md 다크 테마 토큰 그대로 — 이 앱만의 임의 배색 아님 */
+    --canvas: #0a0c14;
+    --surface: #12141f;
+    --surface-raised: #181b2a;
+    --hairline: rgba(255, 255, 255, 0.08);
+    --focus: rgba(93, 143, 255, 0.55);
+    --foreground: #f2f4f8;
+    --muted: #8b8fa3;
+    --accent-blue: #5b8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    background: var(--canvas);
+    color: var(--foreground);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  p.hint { font-size: 13px; color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
+
+  .new-btn {
+    background: var(--surface);
+    border: 1px dashed var(--hairline);
+    border-radius: 12px;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 10px;
+    cursor: pointer;
+    margin-bottom: 16px;
+  }
+  .new-btn:hover { background: var(--surface-raised); color: var(--foreground); border-color: var(--focus); }
+
+  .list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  /* WKWebView는 WebKit 스크롤바 확장 pseudo-element를 지원 — 기본 회색 막대 대신 토큰에 맞춘 모양으로 */
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-track { background: transparent; }
+  .list::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 9999px; }
+  .list::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  .row {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .row .info { min-width: 0; flex: 1; }
+  .name-input {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--foreground);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid transparent;
+    padding: 2px 0;
+    width: 100%;
+  }
+  .name-input:hover { border-bottom-color: var(--hairline); }
+  .name-input:focus { outline: none; border-bottom-color: var(--focus); }
+  .path {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .icon-btn:hover { background: var(--surface-raised); color: var(--foreground); }
+
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 32px 0; }
+
+  .footer { display: flex; justify-content: flex-end; gap: 8px; }
+  button.primary, button.secondary {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 9px 20px;
+    border-radius: 9999px;
+    cursor: pointer;
+    border: none;
+  }
+  button.primary { background: var(--accent-blue); color: #fff; }
+  button.primary:hover { opacity: 0.9; }
+  button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--hairline); }
+  button.secondary:hover { color: var(--foreground); border-color: var(--foreground); }
+</style>
+</head>
+<body>
+  <h1>색인 폴더 관리</h1>
+  <p class="hint">에이전트가 로컬에서 검색할 폴더 목록입니다. "확인"을 눌러야 실제로 적용됩니다.</p>
+  <button class="new-btn" onclick="onNew()">+ 새 폴더 추가</button>
+  <div class="list" id="list"></div>
+  <div class="footer">
+    <button class="secondary" onclick="onCancel()">취소</button>
+    <button class="primary" onclick="onSave()">확인</button>
+  </div>
+
+<script>
+  let folders = [];
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function render() {
+    const list = document.getElementById("list");
+    if (folders.length === 0) {
+      list.innerHTML = '<div class="empty">등록된 폴더가 없습니다</div>';
+      return;
+    }
+    list.innerHTML = folders
+      .map(
+        (f, i) => `
+      <div class="row">
+        <div class="info">
+          <input class="name-input" value="${escapeHtml(f.displayName)}" onchange="onRename(${i}, this.value)" />
+          <div class="path">${escapeHtml(f.rootPath)}</div>
+        </div>
+        <button class="icon-btn" onclick="onDelete(${i})" title="삭제">✕</button>
+      </div>`
+      )
+      .join("");
+  }
+
+  async function onNew() {
+    const picked = await window.pywebview.api.pick_folder();
+    if (!picked) return;
+    folders.push({ searchFolderId: null, displayName: picked.suggestedDisplayName, rootPath: picked.rootPath });
+    render();
+  }
+
+  function onRename(index, value) {
+    if (value) folders[index].displayName = value;
+  }
+
+  function onDelete(index) {
+    folders.splice(index, 1);
+    render();
+  }
+
+  function onCancel() {
+    window.pywebview.api.cancel();
+  }
+
+  async function onSave() {
+    await window.pywebview.api.save(folders);
+  }
+
+  window.addEventListener("pywebviewready", async () => {
+    folders = await window.pywebview.api.get_folders();
+    render();
+  });
+</script>
+</body>
+</html>
