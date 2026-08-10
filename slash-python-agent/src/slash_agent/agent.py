@@ -21,6 +21,7 @@ import websockets.sync.client as ws_client
 from websockets.exceptions import ConnectionClosed
 
 from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pair
+from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import AgentIdentityStore, PersistedAgentIdentity
 from .pairing_client import pair_agent, refresh_session, verify_pairing
 from .processed_task_store import ProcessedTaskStore
@@ -32,8 +33,7 @@ from .protocol import (
 )
 from .system_status import collect_system_status
 
-# Phase B에서 FILE_SEARCH가 추가된다.
-SUPPORTED_TASK_TYPES: tuple[str, ...] = ("SYSTEM_STATUS",)
+SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS")
 
 # RESULT_ACK 수신 후 재수신 대비 보관 기간
 PROCESSED_TASK_RETENTION_S = 60 * 60
@@ -56,6 +56,9 @@ class ContractAgentOptions:
     preset_device_token: Optional[str] = None
     identity_store: Optional[AgentIdentityStore] = None
     processed_task_store: Optional[ProcessedTaskStore] = None
+    # 검색 대상 폴더 목록(정적 설정) — 등록 UI는 아직 없어서 지금은 시작 시 고정 목록만 지원
+    search_folders: list = field(default_factory=list)
+    file_index_store: Optional[FileIndexStore] = None
 
 
 class ContractAgent:
@@ -79,6 +82,14 @@ class ContractAgent:
         return self._device_id
 
     def start(self) -> None:
+        # 폴더 색인은 기다리지 않는다 — 큰 폴더 때문에 WSS 연결·READY가 늦어지면 안 된다.
+        # 스캔이 끝나기 전엔 _build_ready()가 INDEXING 상태를 그대로 보고한다.
+        if self._options.file_index_store is not None:
+            threading.Thread(
+                target=self._options.file_index_store.sync_folders,
+                args=(self._options.search_folders,),
+                daemon=True,
+            ).start()
         self._load_persisted_identity()
         self._load_persisted_result_cache()
         self._pair_if_needed()
@@ -269,10 +280,11 @@ class ContractAgent:
         )
 
     def _build_ready(self) -> dict:
+        search_folders = self._options.file_index_store.list_search_folders() if self._options.file_index_store else []
         return dict(
             maxConcurrentTasks=1,
             supportedTaskTypes=list(SUPPORTED_TASK_TYPES),
-            searchFolders=[],
+            searchFolders=search_folders,
             projectWorkspaces=[],
         )
 
@@ -396,12 +408,24 @@ class ContractAgent:
             return "TASK_TYPE_NOT_SUPPORTED"
         if _iso_to_epoch(message["expiresAt"]) < time.time():
             return "TASK_EXPIRED"
+        if message["taskType"] == "FILE_SEARCH":
+            query = message["parameters"].get("query")
+            search_folder_id = message["parameters"].get("searchFolderId")
+            if not isinstance(query, str) or len(query) == 0:
+                return "INVALID_PARAMETERS"
+            store = self._options.file_index_store
+            if not isinstance(search_folder_id, str) or store is None or not store.is_searchable(search_folder_id):
+                return "SEARCH_FOLDER_NOT_FOUND"
         return None
 
     def _execute_task(self, message: dict) -> dict:
         try:
             if message["taskType"] == "SYSTEM_STATUS":
                 return {"ok": True, "result": collect_system_status()}
+            if message["taskType"] == "FILE_SEARCH":
+                query = str(message["parameters"].get("query", ""))
+                search_folder_id = str(message["parameters"].get("searchFolderId", ""))
+                return {"ok": True, "result": self._options.file_index_store.search(search_folder_id, query)}
             return {
                 "ok": False,
                 "error": {"code": "TASK_TYPE_NOT_SUPPORTED", "message": "unsupported task type", "retryable": False},

@@ -9,17 +9,19 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from .agent import ContractAgent, ContractAgentOptions
+from .file_index import FileIndexStore, SearchFolderConfig
+from .identity_store import KeyringIdentityStore
+from .processed_task_store import JsonFileProcessedTaskStore
+
+STATE_DIR = Path.home() / ".slash-agent-py"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _log(line: str) -> None:
     # 파일/파이프로 리다이렉트되면 표준출력이 완전 버퍼링돼 프로세스 종료 전까지 안 보인다 —
     # 로그는 실시간으로 확인해야 하니 매번 강제로 흘려보낸다.
     print(line, flush=True)
-
-from .agent import ContractAgent, ContractAgentOptions
-from .identity_store import KeyringIdentityStore
-from .processed_task_store import JsonFileProcessedTaskStore
-
-STATE_DIR = Path.home() / ".slash-agent-py"
 
 
 def _obtain_pairing_code(api_base_url: str) -> str:
@@ -52,6 +54,15 @@ def main() -> None:
     api_base_url = os.environ.get("SLASH_AGENT_API_BASE_URL", "http://localhost:4000")
     identity_store = KeyringIdentityStore(service_name="slash-agent-py-dev")
     processed_task_store = JsonFileProcessedTaskStore(STATE_DIR / "processed-tasks.json")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    file_index_store = FileIndexStore(str(STATE_DIR / "file-index.sqlite3"))
+    search_folders = [
+        SearchFolderConfig(
+            search_folder_id="sf-fixtures-01",
+            display_name="테스트 검색 폴더",
+            root_path=str(REPO_ROOT / "fixtures" / "search-folder"),
+        )
+    ]
 
     has_persisted_identity = identity_store.load() is not None
     pairing_code = None if has_persisted_identity else _obtain_pairing_code(api_base_url)
@@ -65,6 +76,8 @@ def main() -> None:
             log=_log,
             identity_store=identity_store,
             processed_task_store=processed_task_store,
+            search_folders=search_folders,
+            file_index_store=file_index_store,
         )
     )
 
@@ -74,6 +87,7 @@ def main() -> None:
 
     def _shutdown(signum, frame):
         agent.stop()
+        file_index_store.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
