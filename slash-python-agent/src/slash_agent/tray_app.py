@@ -21,6 +21,7 @@ from .agent import ContractAgent, ContractAgentOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
 from .processed_task_store import JsonFileProcessedTaskStore
+from .resources import is_frozen, repo_fixtures_search_folder, resource_path
 
 CONFIG_DIR = Path.home() / "Library" / "Application Support" / "slash-agent-py"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -28,8 +29,6 @@ CONFIG_EXAMPLE_PATH = CONFIG_DIR / "config.example.json"
 SEARCH_FOLDERS_PATH = CONFIG_DIR / "search-folders.json"
 FILE_INDEX_DB_PATH = CONFIG_DIR / "file-index.sqlite3"
 PROCESSED_TASKS_PATH = CONFIG_DIR / "processed-tasks.json"
-ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
-REPO_ROOT = Path(__file__).resolve().parents[3]
 
 STATE_LABEL = {
     "CONNECTING": "연결 중...",
@@ -45,7 +44,7 @@ def _default_search_folders() -> list[dict]:
         {
             "searchFolderId": "sf-fixtures-01",
             "displayName": "테스트 검색 폴더",
-            "rootPath": str(REPO_ROOT / "fixtures" / "search-folder"),
+            "rootPath": str(repo_fixtures_search_folder()),
         }
     ]
 
@@ -76,6 +75,12 @@ def _load_config() -> dict:
     }
 
 
+def _log(line: str) -> None:
+    # 파일/파이프로 리다이렉트되면 표준출력이 완전 버퍼링돼 프로세스 종료 전까지 안 보인다
+    # (cli.py에서 이미 겪은 문제와 동일) — 매번 강제로 흘려보낸다.
+    print(line, flush=True)
+
+
 def _obtain_pairing_code(api_base_url: str) -> str:
     """등록 코드가 없으면 시험 전용 자동 로그인+등록코드 발급으로 채운다(cli.py와 동일한 편의 로직)."""
     login_req = urllib.request.Request(
@@ -98,7 +103,7 @@ def _obtain_pairing_code(api_base_url: str) -> str:
 
 class TrayApp(rumps.App):
     def __init__(self):
-        icon_path = ASSETS_DIR / "trayIcon.png"
+        icon_path = resource_path("assets", "trayIcon.png")
         super().__init__("Slash Agent", icon=str(icon_path) if icon_path.exists() else None, quit_button=None)
 
         self.agent: Optional[ContractAgent] = None
@@ -154,7 +159,7 @@ class TrayApp(rumps.App):
                     pairing_code=code,
                     device_name=self.current_config["deviceName"],
                     heartbeat_interval_s=self.current_config["heartbeatIntervalS"],
-                    log=print,
+                    log=_log,
                     identity_store=identity_store,
                     processed_task_store=processed_task_store,
                     search_folders=search_folders,
@@ -175,9 +180,9 @@ class TrayApp(rumps.App):
 
     @rumps.timer(2)
     def refresh(self, _sender=None) -> None:
-        # 색인 폴더 관리 창(별도 "Python" 프로세스)이 뜨면, 개발 모드에서는 둘 다 같은
-        # Python.app 실행파일을 공유해서 그쪽 창이 뜨는 순간 이 프로세스의 Dock 아이콘이
-        # 다시 나타나는 경우가 있다 — 주기적으로 다시 눌러서 되돌린다.
+        # 색인 폴더 관리 창은 같은 실행 파일을 인자만 바꿔 재사용한다(패키징 여부와 무관 —
+        # __main__.py 주석 참고) — 그쪽 창이 떠 있는 동안 이 프로세스의 Dock 아이콘이 macOS
+        # 쪽 사정으로 다시 나타나는 경우가 있어, 주기적으로 다시 눌러서 되돌린다.
         _hide_dock_icon()
 
         if self.agent is not None:
@@ -200,7 +205,7 @@ class TrayApp(rumps.App):
         if not SEARCH_FOLDERS_PATH.exists():
             SEARCH_FOLDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
             SEARCH_FOLDERS_PATH.write_text(json.dumps(_load_search_folders(), ensure_ascii=False, indent=2), encoding="utf-8")
-        subprocess.Popen([sys.executable, "-m", "slash_agent.folders_window", str(SEARCH_FOLDERS_PATH)])
+        subprocess.Popen(_folders_window_command())
 
     def open_config_folder(self, _sender) -> None:
         subprocess.run(["open", "-R", str(CONFIG_PATH)])
@@ -211,6 +216,15 @@ class TrayApp(rumps.App):
         if self.file_index_store is not None:
             self.file_index_store.close()
         rumps.quit_application()
+
+
+def _folders_window_command() -> list[str]:
+    # 얼린 실행 파일은 진입점이 하나뿐이라(sys.executable이 파이썬 인터프리터가 아니라
+    # 이 앱 자신이다), "--folders-window" 인자로 같은 실행 파일을 다시 불러 __main__.py가
+    # 분기하게 한다. 개발 모드는 지금처럼 -m으로 모듈을 직접 지정한다.
+    if is_frozen():
+        return [sys.executable, "--folders-window", str(SEARCH_FOLDERS_PATH)]
+    return [sys.executable, "-m", "slash_agent.folders_window", str(SEARCH_FOLDERS_PATH)]
 
 
 def _hide_dock_icon() -> None:

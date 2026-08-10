@@ -23,7 +23,9 @@ from uuid import uuid4
 
 import webview
 
-HTML_PATH = Path(__file__).resolve().parent / "folders_window.html"
+from .resources import resource_path
+
+HTML_PATH = resource_path("folders_window.html")
 
 
 def load_folders(path: Path) -> list[dict]:
@@ -88,12 +90,9 @@ def _hide_dock_icon() -> None:
         pass
 
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("사용법: python -m slash_agent.folders_window <search-folders.json 경로>", file=sys.stderr)
-        sys.exit(2)
-
-    api = Api(Path(sys.argv[1]))
+def run(config_path_str: str) -> int:
+    """반환값 0 = 확인(적용), 1 = 취소 — __main__.py(얼린 모드 진입점)도 이 함수를 그대로 쓴다."""
+    api = Api(Path(config_path_str))
     api.window = webview.create_window(
         "색인 폴더 관리",
         url=HTML_PATH.as_uri(),
@@ -105,7 +104,14 @@ def main() -> None:
     )
     _hide_dock_icon()
     webview.start()
-    sys.exit(0 if api.applied else 1)
+    return 0 if api.applied else 1
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("사용법: python -m slash_agent.folders_window <search-folders.json 경로>", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(run(sys.argv[1]))
 
 
 if __name__ == "__main__":
