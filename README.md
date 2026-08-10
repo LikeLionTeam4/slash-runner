@@ -13,7 +13,7 @@ Slash(/)는 자연어 질문과 `/` 슬래시 명령어를 한 입력창에서 �
 
 ```text
 slash-python-agent/   구현 전체 — WebSocket 클라이언트, Ed25519 인증, SQLite FTS5 파일 색인,
-                       macOS 메뉴바 트레이 앱(rumps)까지 Python 하나로 구성
+                       메뉴바/시스템 트레이 앱(pystray, macOS·Windows 공통)까지 Python 하나로 구성
 fixtures/              FILE_SEARCH 데모용 샘플 폴더 (개발 중 실행·패키징된 앱 모두 여기를 기본 검색 폴더로 쓴다)
 docs/                   메시지 실전 예시 가이드 (docs/MESSAGE_GUIDE.md)
 legacy-macos/           (이 저장소에는 포함되지 않음, .gitignore 처리) — 참고용 구 목업, 로컬에만 존재
@@ -33,7 +33,7 @@ processed_task_store.py 중복방지·재전송 이력 영속화
 file_index.py           SQLite(FTS5 trigram)+watchdog 다중 폴더 파일 색인
 system_status.py        SYSTEM_STATUS 작업 실행 (psutil)
 agent.py                핵심 — 연결 루프·재연결·인증·작업 처리 (ContractAgent)
-tray_app.py              macOS 메뉴바 트레이 앱 (rumps)
+tray_app.py              메뉴바/시스템 트레이 앱 (pystray, macOS·Windows 공통)
 folders_window.py       색인 폴더 관리 창 (pywebview, slash-web과 같은 디자인 토큰)
 cli.py                   GUI 없는 개발용 CLI 진입점
 __main__.py              단일 진입점 — 트레이 기동 / 색인 폴더 창 분기
@@ -57,6 +57,8 @@ python -m slash_agent.cli
 
 ## 빌드해서 실행파일 만들기 (PyInstaller)
 
+### macOS
+
 ```bash
 cd slash-python-agent
 pip install -e ".[build]"
@@ -68,29 +70,51 @@ pyinstaller slash_agent.spec
   설정되어 있어 메뉴바 전용 앱으로 동작한다.
 - 아이콘(`AppIcon.icns`)·트레이 아이콘·색인 폴더 관리 창 HTML·기본 시드 폴더
   (`fixtures/search-folder`)를 전부 번들에 포함한다.
-- **Apple Silicon(arm64)만 빌드·시험했다.** Intel Mac, Windows는 아직이다.
+- **Apple Silicon(arm64)만 빌드·시험했다.** Intel Mac은 별도 빌드 환경(또는 universal2
+  Python)이 있어야 한다 — 코드 자체는 이미 호환되고 빌드만 다시 하면 된다.
 - Apple Developer ID 서명·공증(notarization)은 하지 않았다.
+
+### Windows
+
+```powershell
+cd slash-python-agent
+pip install -e ".[build]"
+pyinstaller slash_agent_windows.spec
+```
+
+- 결과물: `slash-python-agent/dist/SlashAgent/SlashAgent.exe`
+- 트레이(`pystray`)·색인 폴더 관리 창(`pywebview`, WebView2)은 macOS와 같은 코드를 그대로
+  쓴다 — 다만 **이 스펙은 macOS에서 작성만 했고 PyInstaller는 크로스 컴파일을 지원하지
+  않아, 실제 Windows에서의 빌드·실행 검증은 아직 못했다**(알려진 한계 — Windows 개발
+  환경이 없어서). Windows에서 처음 빌드할 때 `hiddenimports`(특히 `pywebview`의
+  EdgeChromium/WebView2 백엔드)가 부족해서 실패할 가능성이 있으니 에러 메시지를 보고
+  스펙을 조정해야 할 수 있다.
 
 ## 설정
 
 설정은 다음 순서로 적용된다:
 
-1. `~/Library/Application Support/slash-agent-py/config.json`
+1. `~/Library/Application Support/slash-agent-py/config.json`(macOS) 또는
+   `%APPDATA%\slash-agent-py\config.json`(Windows)
 2. 환경변수(`SLASH_AGENT_API_BASE_URL`, `SLASH_AGENT_PAIRING_CODE`, `SLASH_AGENT_DEVICE_NAME`,
    `SLASH_AGENT_HEARTBEAT_INTERVAL_S`) — 터미널에서 `python -m slash_agent.tray_app`으로 실행할 때 유용
 3. 기본값(`http://localhost:4000`, 자동 페어링)
 
 앱을 처음 실행하면 위 설정 폴더에 `config.example.json`을 자동으로 생성한다. 메뉴의 **"설정 폴더
-열기"**로 Finder에서 바로 확인할 수 있다. `pairingCode`를 지정하지 않으면 시험 전용 자동 로그인으로
-페어링 코드를 자동 발급받는다(`slash-api`가 `/test/login`, `POST /api/v1/pairing-requests`를 제공할
-때만 동작하며, 실제 운영 백엔드에는 해당 엔드포인트가 없다).
+열기"**로 Finder(Windows는 탐색기)에서 바로 확인할 수 있다. `pairingCode`를 지정하지 않으면 시험
+전용 자동 로그인으로 페어링 코드를 자동 발급받는다(`slash-api`가 `/test/login`,
+`POST /api/v1/pairing-requests`를 제공할 때만 동작하며, 실제 운영 백엔드에는 해당 엔드포인트가 없다).
 
-메뉴바 아이콘 클릭 시 보이는 항목: 상태(연결중/READY/오프라인), 기기 ID, 접속 중인 `slash-api` 주소,
-**색인 폴더 관리**, 설정 폴더 열기, 종료. Dock 아이콘은 뜨지 않는다(메뉴바 전용).
+메뉴바/트레이 아이콘 클릭 시 보이는 항목: 상태(연결중/READY/오프라인), 기기 ID, 접속 중인 `slash-api`
+주소, **색인 폴더 관리**, 설정 폴더 열기, 종료. macOS에서는 Dock 아이콘이 뜨지 않는다(메뉴바 전용,
+Windows는 애초에 이런 개념이 없어 해당 없음).
 
-색인 폴더 관리 창은 별도 프로세스로 뜬다(rumps와 GUI 창 라이브러리가 같은 프로세스의 macOS 메인
+색인 폴더 관리 창은 별도 프로세스로 뜬다(트레이 아이콘과 GUI 창은 둘 다 같은 프로세스의 메인
 스레드 이벤트루프를 동시에 못 써서) — `search-folders.json` 파일을 통해 실행 중인 트레이 앱과
 동기화된다(2초 주기로 변경 감지).
+
+> Windows 지원은 트레이 코드(`pystray`)까지는 macOS와 공통이지만, 실제 Windows 환경에서의
+> 패키징·실행 검증은 아직 못했다(이 개발 환경이 macOS뿐이라) — 알려진 한계로 남겨둔다.
 
 ## 메시지 프로토콜
 
@@ -204,7 +228,10 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
 
 ## 알려진 한계
 
-- Apple Silicon(arm64)만 빌드/시험했다. Intel Mac, Windows는 아직이다.
+- Apple Silicon(arm64) macOS에서만 실제로 빌드·시험했다. Intel Mac은 코드는 호환되지만
+  별도 빌드 환경이 없어 빌드·시험을 못했고, Windows는 코드(`pystray`+`%APPDATA%` 경로
+  분기)까지는 macOS와 공통이지만 `slash_agent_windows.spec`은 Windows 개발 환경이 없어
+  실제 빌드·실행 검증을 못한 상태다(둘 다 알려진 한계).
 - Apple Developer ID 서명·공증(notarization)은 하지 않았다 — 배포하려면 별도로 필요하다.
 - `FILE_SEARCH`의 기본 검색 폴더는 시험용 Fixture(`fixtures/search-folder`)다. 사용자가 색인 폴더
   관리 창으로 폴더를 직접 추가할 수는 있지만, `slash-api`가 여러 폴더 중 검색 대상을 자동으로

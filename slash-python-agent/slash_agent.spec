@@ -22,10 +22,10 @@ a = Analysis(
     pathex=[str(project_root / "src")],
     binaries=[],
     datas=datas,
-    # rumps/pywebview는 실행 시점에 플랫폼별 백엔드를 골라 import해서 정적 분석에 안 잡힌다
+    # pystray/pywebview는 실행 시점에 플랫폼별 백엔드를 골라 import해서 정적 분석에 안 잡힌다
     hiddenimports=[
         "webview.platforms.cocoa",
-        "rumps",
+        "pystray._darwin",
         "AppKit",
         "Foundation",
         "objc",
