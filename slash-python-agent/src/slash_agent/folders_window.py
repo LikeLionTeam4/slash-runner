@@ -1,6 +1,6 @@
 """색인 폴더 관리 창 — searchFoldersWindow.html+preload.cjs+IPC 핸들러 대응.
 
-rumps(트레이)와 GUI 창은 둘 다 macOS 메인 스레드의 이벤트 루프가 필요해서 같은 프로세스
+트레이(pystray)와 GUI 창은 둘 다 메인 스레드의 이벤트 루프가 필요해서 같은 프로세스
 안에서 같이 못 돌린다 — 그래서 이 창은 별도 프로세스로 띄우고, search-folders.json 파일을
 공유 인터페이스로 삼는다. tray_app.py는 이 파일의 mtime 변화를 주기적으로 감지해 반영한다
 (실행 중인 색인 상태는 여기서 보여주지 않는다 — 그 상태는 트레이 메뉴 쪽 몫).

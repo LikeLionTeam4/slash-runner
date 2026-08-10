@@ -7,12 +7,23 @@ PyInstaller onefile 빌드는 실행 시점에 번들된 데이터 파일을 임
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
+
+
+def config_dir(app_name: str = "slash-agent-py") -> Path:
+    """앱 설정·상태 저장 디렉터리 — OS별 관례 경로로 분기한다.
+    Windows는 %APPDATA%(없으면 홈 폴더 밑 AppData\\Roaming으로 폴백), 그 외(macOS)는
+    Application Support를 쓴다."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+        return base / app_name
+    return Path.home() / "Library" / "Application Support" / app_name
 
 
 def resource_path(*parts: str) -> Path:

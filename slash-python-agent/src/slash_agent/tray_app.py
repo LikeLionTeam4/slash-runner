@@ -1,4 +1,9 @@
-"""macOS 메뉴바 트레이 앱 — main.cjs(agent-app)의 트레이 부분 대응.
+"""메뉴바/시스템 트레이 앱 — main.cjs(agent-app)의 트레이 부분 대응.
+
+`pystray`로 macOS·Windows 공통 코드를 쓴다(원래 macOS 전용 `rumps`였으나, 같은 UI를
+플랫폼별로 따로 만들지 않기 위해 통일했다 — 런타임 메모리는 실측 결과 rumps와 큰 차이가
+없었고, PyInstaller 패키징 관점에서도 무거운 GUI 프레임워크(Qt 등)를 새로 끌어들이지
+않는다).
 
 색인 폴더 관리 창은 별도 프로세스(folders_window.py)로 띄우고, search-folders.json 파일
 변경을 여기서 주기적으로 감지해 실행 중인 에이전트에 반영한다(둘 다 자세한 이유는
@@ -11,24 +16,28 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import urllib.request
 from pathlib import Path
 from typing import Optional
 
-import rumps
+import pystray
+from PIL import Image
 
 from .agent import ContractAgent, ContractAgentOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
 from .processed_task_store import JsonFileProcessedTaskStore
-from .resources import is_frozen, repo_fixtures_search_folder, resource_path
+from .resources import config_dir, is_frozen, repo_fixtures_search_folder, resource_path
 
-CONFIG_DIR = Path.home() / "Library" / "Application Support" / "slash-agent-py"
+CONFIG_DIR = config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 CONFIG_EXAMPLE_PATH = CONFIG_DIR / "config.example.json"
 SEARCH_FOLDERS_PATH = CONFIG_DIR / "search-folders.json"
 FILE_INDEX_DB_PATH = CONFIG_DIR / "file-index.sqlite3"
 PROCESSED_TASKS_PATH = CONFIG_DIR / "processed-tasks.json"
+
+REFRESH_INTERVAL_S = 2.0
 
 STATE_LABEL = {
     "CONNECTING": "연결 중...",
@@ -68,7 +77,7 @@ def _load_config() -> dict:
     return {
         "apiBaseUrl": file_config.get("apiBaseUrl") or os.environ.get("SLASH_AGENT_API_BASE_URL", "http://localhost:4000"),
         "pairingCode": file_config.get("pairingCode") or os.environ.get("SLASH_AGENT_PAIRING_CODE"),
-        "deviceName": file_config.get("deviceName") or os.environ.get("SLASH_AGENT_DEVICE_NAME", "slash-agent-py (macOS)"),
+        "deviceName": file_config.get("deviceName") or os.environ.get("SLASH_AGENT_DEVICE_NAME", "slash-agent-py"),
         "heartbeatIntervalS": float(
             file_config.get("heartbeatIntervalS") or os.environ.get("SLASH_AGENT_HEARTBEAT_INTERVAL_S", 30)
         ),
@@ -101,36 +110,38 @@ def _obtain_pairing_code(api_base_url: str) -> str:
         return json.loads(res.read().decode())["data"]["pairingCode"]
 
 
-class TrayApp(rumps.App):
+class TrayApp:
     def __init__(self):
         icon_path = resource_path("assets", "trayIcon.png")
-        super().__init__("Slash Agent", icon=str(icon_path) if icon_path.exists() else None, quit_button=None)
+        image = Image.open(icon_path) if icon_path.exists() else Image.new("RGBA", (16, 16), (0, 0, 0, 0))
 
         self.agent: Optional[ContractAgent] = None
         self.file_index_store: Optional[FileIndexStore] = None
         self.current_config: dict = {}
         self._search_folders_mtime: Optional[float] = None
+        self._status_text = "상태: 연결 중..."
+        self._device_text = "기기 ID: -"
+        self._api_text = "mock-api: -"
+        self._stop_event = threading.Event()
 
-        self.status_item = rumps.MenuItem("상태: 연결 중...")
-        self.device_item = rumps.MenuItem("기기 ID: -")
-        self.api_item = rumps.MenuItem("mock-api: -")
-        self.menu = [
-            self.status_item,
-            self.device_item,
-            self.api_item,
-            None,
-            rumps.MenuItem("색인 폴더 관리", callback=self.open_folders_window),
-            rumps.MenuItem("설정 폴더 열기", callback=self.open_config_folder),
-            None,
-            rumps.MenuItem("종료", callback=self.quit_app),
-        ]
+        menu = pystray.Menu(
+            pystray.MenuItem(lambda item: self._status_text, None, enabled=False),
+            pystray.MenuItem(lambda item: self._device_text, None, enabled=False),
+            pystray.MenuItem(lambda item: self._api_text, None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("색인 폴더 관리", self.open_folders_window),
+            pystray.MenuItem("설정 폴더 열기", self.open_config_folder),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("종료", self.quit_app),
+        )
+        self.icon = pystray.Icon("slash-agent", icon=image, title="Slash Agent", menu=menu)
 
     def start_agent(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         if not CONFIG_EXAMPLE_PATH.exists():
             CONFIG_EXAMPLE_PATH.write_text(
                 json.dumps(
-                    {"apiBaseUrl": "http://localhost:4000", "pairingCode": "123456", "deviceName": "내 Mac", "heartbeatIntervalS": 30},
+                    {"apiBaseUrl": "http://localhost:4000", "pairingCode": "123456", "deviceName": "내 PC", "heartbeatIntervalS": 30},
                     ensure_ascii=False,
                     indent=2,
                 ),
@@ -178,8 +189,11 @@ class TrayApp(rumps.App):
             self.agent = build_agent(_obtain_pairing_code(api_base_url))
             self.agent.start()
 
-    @rumps.timer(2)
-    def refresh(self, _sender=None) -> None:
+    def _refresh_loop(self) -> None:
+        while not self._stop_event.wait(REFRESH_INTERVAL_S):
+            self.refresh()
+
+    def refresh(self) -> None:
         # 색인 폴더 관리 창은 같은 실행 파일을 인자만 바꿔 재사용한다(패키징 여부와 무관 —
         # __main__.py 주석 참고) — 그쪽 창이 떠 있는 동안 이 프로세스의 Dock 아이콘이 macOS
         # 쪽 사정으로 다시 나타나는 경우가 있어, 주기적으로 다시 눌러서 되돌린다.
@@ -188,9 +202,10 @@ class TrayApp(rumps.App):
         if self.agent is not None:
             state = self.agent.get_state()
             device_id = self.agent.get_device_id()
-            self.status_item.title = f"상태: {STATE_LABEL.get(state, state)}"
-            self.device_item.title = f"기기 ID: {(device_id[:8] + '…') if device_id else '-'}"
-            self.api_item.title = f"mock-api: {self.current_config.get('apiBaseUrl', '-')}"
+            self._status_text = f"상태: {STATE_LABEL.get(state, state)}"
+            self._device_text = f"기기 ID: {(device_id[:8] + '…') if device_id else '-'}"
+            self._api_text = f"mock-api: {self.current_config.get('apiBaseUrl', '-')}"
+            self.icon.update_menu()
 
         # folders_window(별도 프로세스)가 search-folders.json을 바꿨는지 주기적으로 확인
         if self.file_index_store is not None and SEARCH_FOLDERS_PATH.exists():
@@ -201,21 +216,38 @@ class TrayApp(rumps.App):
                 search_folders = [SearchFolderConfig(f["searchFolderId"], f["displayName"], f["rootPath"]) for f in folders]
                 self.file_index_store.sync_folders(search_folders)
 
-    def open_folders_window(self, _sender) -> None:
+    def open_folders_window(self, icon, item) -> None:
         if not SEARCH_FOLDERS_PATH.exists():
             SEARCH_FOLDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
             SEARCH_FOLDERS_PATH.write_text(json.dumps(_load_search_folders(), ensure_ascii=False, indent=2), encoding="utf-8")
         subprocess.Popen(_folders_window_command())
 
-    def open_config_folder(self, _sender) -> None:
-        subprocess.run(["open", "-R", str(CONFIG_PATH)])
+    def open_config_folder(self, icon, item) -> None:
+        if sys.platform == "win32":
+            subprocess.run(["explorer", str(CONFIG_DIR)])
+        else:
+            subprocess.run(["open", "-R", str(CONFIG_PATH)])
 
-    def quit_app(self, _sender) -> None:
+    def quit_app(self, icon, item) -> None:
+        self._stop_event.set()
         if self.agent is not None:
             self.agent.stop()
         if self.file_index_store is not None:
             self.file_index_store.close()
-        rumps.quit_application()
+        icon.stop()
+
+    def setup(self, icon) -> None:
+        try:
+            self.start_agent()
+        except Exception as e:
+            print(f"에이전트 시작 실패: {e}", file=sys.stderr)
+            self._status_text = f"상태: 시작 실패 - {e}"
+        # pystray가 백엔드(macOS는 NSApplication, Windows는 win32 메시지 루프)를 초기화한
+        # *이후*에 이 함수가 별도 스레드로 호출된다 — folders_window.py가 pywebview에서 겪은
+        # 것과 같은 종류의 순서 문제라, Dock 숨김도 여기서(icon.run() 진입 이후) 걸어야 한다.
+        _hide_dock_icon()
+        icon.visible = True
+        threading.Thread(target=self._refresh_loop, daemon=True).start()
 
 
 def _folders_window_command() -> list[str]:
@@ -230,7 +262,8 @@ def _folders_window_command() -> list[str]:
 def _hide_dock_icon() -> None:
     # 패키징 전(Info.plist 없는 개발 모드)엔 macOS가 기본값으로 이 프로세스를 "Python"이라는
     # 이름과 기본 파이썬 아이콘으로 Dock에 띄운다 — 메뉴바 전용 앱이라 감춘다
-    # (Electron agent-app의 app.dock.hide()와 동일한 목적).
+    # (Electron agent-app의 app.dock.hide()와 동일한 목적). Windows에는 이 개념 자체가
+    # 없으므로(AppKit import가 실패해) 아무 효과 없이 조용히 넘어간다.
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
 
@@ -241,16 +274,7 @@ def _hide_dock_icon() -> None:
 
 def main() -> None:
     app = TrayApp()
-    try:
-        app.start_agent()
-    except Exception as e:
-        print(f"에이전트 시작 실패: {e}", file=sys.stderr)
-        app.status_item.title = f"상태: 시작 실패 - {e}"
-    # rumps.App.run()이 내부에서 NSApplication.sharedApplication()을 다시 건드리므로
-    # (activateIgnoringOtherApps_ 등), 그보다 먼저 정책을 바꿔봐야 소용없다 — run() 진입 직전에
-    # 걸어야 한다. folders_window.py가 pywebview에서 겪은 것과 같은 종류의 순서 문제.
-    _hide_dock_icon()
-    app.run()
+    app.icon.run(setup=app.setup)
 
 
 if __name__ == "__main__":
