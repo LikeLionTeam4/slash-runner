@@ -14,7 +14,12 @@ dependencies = [
     "cryptography>=42.0",
     "psutil>=5.9",
     "watchdog>=6.0",
+    "pywebview>=6.0",
 ]
+
+[project.scripts]
+slash-agent-tray = "slash_agent.tray_app:main"
+slash-agent-cli = "slash_agent.cli:main"
 
 [project.optional-dependencies]
 build = [
