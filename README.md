@@ -12,91 +12,85 @@ Slash(/)는 자연어 질문과 `/` 슬래시 명령어를 한 입력창에서 �
 ## 구성
 
 ```text
-contracts/        공유 타입·zod 스키마 (REST/Agent WSS 계약의 단일 소스)
-contract-agent/   핵심 로직 — WebSocket 클라이언트, Ed25519 인증, 작업 실행. GUI 없는 순수 라이브러리 + CLI.
-agent-app/        contract-agent를 감싼 macOS 메뉴바 실행파일 (Electron 셸)
-fixtures/         FILE_SEARCH 데모용 샘플 폴더 (개발 중 실행·패키징된 앱 모두 여기를 기본 검색 폴더로 쓴다)
-docs/             메시지 실전 예시 가이드 (docs/MESSAGE_GUIDE.md)
-legacy-macos/     (이 저장소에는 포함되지 않음, .gitignore 처리) — 참고용 구 목업, 로컬에만 존재
+slash-python-agent/   구현 전체 — WebSocket 클라이언트, Ed25519 인증, SQLite FTS5 파일 색인,
+                       macOS 메뉴바 트레이 앱(rumps)까지 Python 하나로 구성
+fixtures/              FILE_SEARCH 데모용 샘플 폴더 (개발 중 실행·패키징된 앱 모두 여기를 기본 검색 폴더로 쓴다)
+docs/                   메시지 실전 예시 가이드 (docs/MESSAGE_GUIDE.md)
+legacy-macos/           (이 저장소에는 포함되지 않음, .gitignore 처리) — 참고용 구 목업, 로컬에만 존재
 ```
 
-`agent-app`은 `contract-agent`의 로직을 **그대로 재사용**한다 — GUI는 그 위에 얹은 얇은 껍데기일 뿐,
-WebSocket 프로토콜·인증·작업 실행 코드는 한 곳(`contract-agent/src/`)에만 존재한다.
+원래 Electron(TypeScript)으로 구현했다가 Python으로 전환했다 — 유휴 상태 기준 메모리 사용량이
+약 10배 차이 나는 것을 실측으로 확인하고 내린 결정이다(`slash-python-agent/FINDINGS.md` 참고).
 
-## 다운로드해서 바로 실행하기 (빌드 없이)
+`slash-python-agent/src/slash_agent/` 안 구성:
 
-직접 빌드하지 않고 사용하려면 [Releases](https://github.com/LikeLionTeam4/slash-agent/releases)에서
-`Slash Agent-x.y.z-arm64.dmg`를 내려받아 실행한다 (**Apple Silicon 전용**).
+```text
+protocol.py            메시지 envelope·상수 (schemaVersion, TaskType, ReasonCode 등)
+crypto.py               Ed25519 기기 신원(키 생성·서명·PEM 내보내기/복원)
+pairing_client.py       HTTP 페어링/토큰 갱신 클라이언트
+identity_store.py       기기 식별 정보 영속화 (keyring → macOS Keychain 등 OS 보안 저장소)
+processed_task_store.py 중복방지·재전송 이력 영속화
+file_index.py           SQLite(FTS5 trigram)+watchdog 다중 폴더 파일 색인
+system_status.py        SYSTEM_STATUS 작업 실행 (psutil)
+agent.py                핵심 — 연결 루프·재연결·인증·작업 처리 (ContractAgent)
+tray_app.py              macOS 메뉴바 트레이 앱 (rumps)
+folders_window.py       색인 폴더 관리 창 (pywebview, slash-web과 같은 디자인 토큰)
+cli.py                   GUI 없는 개발용 CLI 진입점
+__main__.py              단일 진입점 — 트레이 기동 / 색인 폴더 창 분기
+```
 
-1. dmg 파일을 다운로드한 뒤 더블클릭해 마운트한다.
-2. 마운트된 창에서 `Slash Agent.app`을 `Applications` 폴더 아이콘 위로 드래그해 설치한다.
-3. `/Applications/Slash Agent.app`을 더블클릭 대신 **우클릭 → 열기**로 처음 실행한다. ad-hoc 서명만
-   적용되어 있어 더블클릭 시 "확인되지 않은 개발자" 경고가 표시된다. 우클릭 → 열기로 최초 1회 실행하면
-   이후에는 더블클릭으로도 실행할 수 있다.
-4. 상단 메뉴바에 Slash 아이콘이 표시되는지 확인한다. 클릭하면 연결 상태, 기기 ID, 종료 메뉴가 나타난다.
-
-실행 자체는 로컬 Node.js·Python 설치 여부와 무관하게 동작한다(Electron이 런타임을 자체 포함). 단, 상태가
-`연결 중...`에서 `READY`로 바뀌려면 페어링 대상 백엔드(`slash-api`)가 실행 중이어야 한다. 백엔드가
-없는 상태에서도 앱은 종료되지 않으며 트레이 아이콘과 메뉴는 정상적으로 동작한다.
-
-## 빌드해서 실행파일 만들기
+## 실행하기 (개발 모드, 패키징 없이)
 
 ```bash
-cd agent-app
-npm install
-npm run dist:mac
+cd slash-python-agent
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[test]"
+
+python -m slash_agent.tray_app   # 메뉴바 트레이 앱
+# 또는 GUI 없이 콘솔에서만:
+python -m slash_agent.cli
 ```
 
-- 결과물: `agent-app/dist/mac-arm64/Slash Agent.app`
-- `npm run dist:mac`은 먼저 `contract-agent`를 esbuild로 단일 파일(`agent-app/vendor/contract-agent.mjs`)로
-  번들링한 뒤(`predist:mac` 훅), Electron으로 `.app`을 패키징한다.
-- **Apple Silicon(arm64) 전용**으로 빌드한다(`electron-builder --mac --arm64`). Intel Mac 빌드는 아직
-  시험하지 않았다.
-- Apple Developer ID 서명은 적용되어 있지 않다. macOS는 arm64 실행파일에 최소한 **ad-hoc 서명**을
-  요구하며, electron-builder는 별도 인증서를 찾지 못하면 자동으로 ad-hoc 서명(`codesign -s -`)을
-  적용한다. 처음 실행 시 "확인되지 않은 개발자" 경고가 표시되면 다음과 같이 처리한다:
-  ```bash
-  xattr -cr "agent-app/dist/mac-arm64/Slash Agent.app"   # 격리 속성 제거
-  # 그래도 안 되면 수동 ad-hoc 서명
-  codesign --deep --force --sign - "agent-app/dist/mac-arm64/Slash Agent.app"
-  ```
-  Finder에서는 더블클릭 대신 **우클릭 → 열기**로 처음 한 번 실행하면 이 경고를 건너뛸 수 있다.
-- `package.json`의 `build.npmRebuild`는 반드시 `false`로 유지해야 한다. electron-builder는 기본적으로
-  패키징 전에 "production dependencies 재설치" 단계를 수행하는데, 이 저장소는 npm workspaces 구조이므로
-  해당 단계가 루트에 hoisting된 devDependencies(`app-builder-bin` 포함)를 삭제한다. 그 결과
-  electron-builder가 자신의 의존성을 잃고 빌드 중 `spawn .../app-builder-bin/mac/app-builder_arm64
-  ENOENT` 오류로 실패한다. 이 앱의 런타임 의존성(`ws`, `zod`)은 순수 JS로 작성되어 있어 애초에 이
-  재설치 단계가 불필요하다. 이 옵션 값을 임의로 변경하면 동일한 오류가 재발한다.
+상태가 `연결 중...`에서 `READY`로 바뀌려면 페어링 대상 백엔드(`slash-api`)가 실행 중이어야 한다.
+백엔드가 없는 상태에서도 앱은 종료되지 않으며 트레이 아이콘과 메뉴는 정상적으로 동작한다.
 
-빌드된 실행파일은 로컬 Node.js·Python 설치 여부와 무관하게 동작한다. Electron이 자체 Node.js·Chromium
-런타임을 앱 번들 안에 포함하기 때문이다. `.app` 실행 시점부터는 시스템에 별도로 Node나 Python이 설치되어
-있을 필요가 없다. 단, 빌드 자체는 Node/npm 환경을 필요로 한다.
-
-## 개발 중 실행 (패키징 없이)
+## 빌드해서 실행파일 만들기 (PyInstaller)
 
 ```bash
-cd agent-app
-npm install
-npm run start
+cd slash-python-agent
+pip install -e ".[build]"
+pyinstaller slash_agent.spec
 ```
+
+- 결과물: `slash-python-agent/dist/Slash Agent.app`
+- onedir + macOS `BUNDLE`로 빌드한다 — `Info.plist`에 `LSUIElement`(Dock 아이콘 숨김)가
+  설정되어 있어 메뉴바 전용 앱으로 동작한다.
+- 아이콘(`AppIcon.icns`)·트레이 아이콘·색인 폴더 관리 창 HTML·기본 시드 폴더
+  (`fixtures/search-folder`)를 전부 번들에 포함한다.
+- **Apple Silicon(arm64)만 빌드·시험했다.** Intel Mac, Windows는 아직이다.
+- Apple Developer ID 서명·공증(notarization)은 하지 않았다.
 
 ## 설정
 
-Finder에서 더블클릭으로 실행한 앱은 터미널 환경변수를 물려받지 않는다. 이에 따라 설정은 다음 순서로
-적용된다:
+설정은 다음 순서로 적용된다:
 
-1. `~/Library/Application Support/slash-agent-app/config.json`
-2. 환경변수(`CONTRACT_AGENT_API_BASE_URL`, `CONTRACT_AGENT_PAIRING_CODE`, `CONTRACT_AGENT_DEVICE_NAME`,
-   `CONTRACT_AGENT_HEARTBEAT_INTERVAL_MS`) — 터미널에서 `npm run start`로 실행할 때 유용
+1. `~/Library/Application Support/slash-agent-py/config.json`
+2. 환경변수(`SLASH_AGENT_API_BASE_URL`, `SLASH_AGENT_PAIRING_CODE`, `SLASH_AGENT_DEVICE_NAME`,
+   `SLASH_AGENT_HEARTBEAT_INTERVAL_S`) — 터미널에서 `python -m slash_agent.tray_app`으로 실행할 때 유용
 3. 기본값(`http://localhost:4000`, 자동 페어링)
 
-앱을 처음 실행하면 위 설정 폴더에 `config.example.json`을 자동으로 생성한다. 메뉴의 **"설정 폴더 열기"**로
-Finder에서 바로 확인할 수 있다. `pairingCode`를 지정하지 않으면 시험 전용 자동 로그인으로 페어링 코드를
-자동 발급받는다(`slash-api`가 `/test/login`, `POST /api/v1/pairing-requests`를 제공할 때만 동작하며,
-실제 운영 백엔드에는 해당 엔드포인트가 없다).
+앱을 처음 실행하면 위 설정 폴더에 `config.example.json`을 자동으로 생성한다. 메뉴의 **"설정 폴더
+열기"**로 Finder에서 바로 확인할 수 있다. `pairingCode`를 지정하지 않으면 시험 전용 자동 로그인으로
+페어링 코드를 자동 발급받는다(`slash-api`가 `/test/login`, `POST /api/v1/pairing-requests`를 제공할
+때만 동작하며, 실제 운영 백엔드에는 해당 엔드포인트가 없다).
 
 메뉴바 아이콘 클릭 시 보이는 항목: 상태(연결중/READY/오프라인), 기기 ID, 접속 중인 `slash-api` 주소,
-설정 폴더 열기, 종료. Dock 아이콘은 뜨지 않는다(메뉴바 전용, `LSUIElement`).
+**색인 폴더 관리**, 설정 폴더 열기, 종료. Dock 아이콘은 뜨지 않는다(메뉴바 전용).
+
+색인 폴더 관리 창은 별도 프로세스로 뜬다(rumps와 GUI 창 라이브러리가 같은 프로세스의 macOS 메인
+스레드 이벤트루프를 동시에 못 써서) — `search-folders.json` 파일을 통해 실행 중인 트레이 앱과
+동기화된다(2초 주기로 변경 감지).
 
 ## 메시지 프로토콜
 
@@ -133,9 +127,9 @@ POST /api/v1/agent/sessions/refresh     (Agent → API)
 ```
 
 서명 대상 문자열 = `${deviceId}:${refreshNonce}:${requestedAt}`. `requestedAt`이 서버 기준 ±120초를
-벗어나거나 `refreshNonce`를 재사용하면 요청이 거부된다(재전송 공격 방지). 이 저장소의 `contract-agent`는
-24시간 이내에 재시작하는 짧은 시험 시나리오 위주로 운용되어 이 경로를 실행하는 코드는 아직 구현되어
-있지 않다. `slash-api` 쪽 구현·시험은 완료된 상태다.
+벗어나거나 `refreshNonce`를 재사용하면 요청이 거부된다(재전송 공격 방지). 저장된 기기 식별 정보가
+있으면 재시작할 때마다 재페어링 대신 이 경로부터 시도하고, 실패하면 재페어링으로 폴백한다 — 실제로
+구현·시험되어 있다.
 
 ### 2) Agent WSS (`/ws/agent`, 접속 후 계속 유지되는 세션)
 
@@ -187,13 +181,14 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
 이 Agent는 P0로 지정된 두 가지 작업만 실행하며, 그 외의 `taskType`은 `TASK_TYPE_NOT_SUPPORTED`로
 거부한다.
 
-- **`SYSTEM_STATUS`**: 이 Mac의 실제 `os.loadavg()`/`os.totalmem()`/`os.freemem()`, `df -k /`(디스크)를
-  읽어 `{cpuPercent, memoryPercent, memoryTotalMb, memoryUsedMb, diskPercent, diskTotalMb, diskUsedMb,
+- **`SYSTEM_STATUS`**: 이 Mac의 실제 CPU/메모리(`psutil`)·디스크 사용량을 읽어
+  `{cpuPercent, memoryPercent, memoryTotalMb, memoryUsedMb, diskPercent, diskTotalMb, diskUsedMb,
   collectedAt}`를 반환한다. parameters 없음.
-- **`FILE_SEARCH`**: `parameters.query`로 지정 폴더(`READY`의 `searchFolders`에 등록한 폴더, 패키징된
-  앱은 앱 리소스 안의 `fixtures/search-folder`가 기본값) 안의 파일을 이름으로 검색해
+- **`FILE_SEARCH`**: `parameters.query`로 지정 폴더(`READY`의 `searchFolders`에 등록한 폴더, 기본값은
+  `fixtures/search-folder`) 안의 파일을 SQLite FTS5(trigram)로 검색해
   `{items:[{name, relativePath, sizeBytes, modifiedAt}], returnedCount, truncated}`를 반환한다.
-  **상대 경로만** 반환하고 로컬 절대 경로는 절대 내보내지 않는다.
+  **상대 경로만** 반환하고 로컬 절대 경로는 절대 내보내지 않는다. 폴더는 watchdog로 실시간
+  증분 감시된다(재시작 없이 추가/삭제 반영).
 
 ### 4) 안정성 관련 동작
 
@@ -204,18 +199,20 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
 - **ACK 타임아웃**: API가 TASK를 보내고 5초 안에 ACK가 없으면 같은 `taskId`/`dispatchId`로 한 번만
   재전송한다.
 
-전체 스키마 정의는 `contracts/src/agentMessages.ts`·`contracts/src/restApi.ts`(zod), 실제 구현은
-`contract-agent/src/agent.ts`를 참고한다. 실제로 오가는 JSON 예시는
-[`docs/MESSAGE_GUIDE.md`](docs/MESSAGE_GUIDE.md)에 정리되어 있다.
+전체 구현은 `slash-python-agent/src/slash_agent/agent.py`(연결 루프)·`protocol.py`(메시지 상수)를
+참고한다. 실제로 오가는 JSON 예시는 [`docs/MESSAGE_GUIDE.md`](docs/MESSAGE_GUIDE.md)에 정리되어 있다.
 
 ## 알려진 한계
 
 - Apple Silicon(arm64)만 빌드/시험했다. Intel Mac, Windows는 아직이다.
 - Apple Developer ID 서명·공증(notarization)은 하지 않았다 — 배포하려면 별도로 필요하다.
-- `FILE_SEARCH`의 기본 검색 폴더는 시험용 Fixture(`fixtures/search-folder`)다. 실제 사용자 폴더를
-  등록/검색하는 UI는 아직 없다(추후 `agent-app`에 폴더 선택 기능을 추가해야 한다).
-- 자동 페어링(`obtainPairingCode`)은 `slash-api`의 시험 전용 엔드포인트(`/test/login`)에 의존한다 —
+- `FILE_SEARCH`의 기본 검색 폴더는 시험용 Fixture(`fixtures/search-folder`)다. 사용자가 색인 폴더
+  관리 창으로 폴더를 직접 추가할 수는 있지만, `slash-api`가 여러 폴더 중 검색 대상을 자동으로
+  고르는 로직은 아직 첫 번째 등록 폴더만 쓴다(다중 폴더 검색 라우팅은 api·nlu·web 합의 필요).
+- 자동 페어링(`_obtain_pairing_code`)은 `slash-api`의 시험 전용 엔드포인트(`/test/login`)에 의존한다 —
   실제 운영 백엔드에 붙일 때는 `config.json`에 `pairingCode`를 직접 넣어야 한다.
+- 트레이 앱과 색인 폴더 관리 창을 동시에 띄우면, 둘이 같은 실행 파일을 공유해서 macOS Dock에
+  트레이 아이콘이 잠깐 다시 나타나는 잔여 현상이 있다(닫으면 사라짐, 기능에는 영향 없음).
 
 ## 관련 저장소
 
