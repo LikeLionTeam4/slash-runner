@@ -15,11 +15,17 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Optional
 
 import websockets.sync.client as ws_client
 from websockets.exceptions import ConnectionClosed
 
+from .code_adapters import (
+    AVAILABILITY_CHECKS as CODE_ADAPTER_AVAILABILITY_CHECKS,
+    RUNNERS as CODE_ADAPTER_RUNNERS,
+    ProjectWorkspaceConfig,
+)
 from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pair
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import AgentIdentityStore, PersistedAgentIdentity
@@ -34,7 +40,7 @@ from .protocol import (
 from .system_status import collect_system_status
 from .usage_adapters import COLLECTORS
 
-SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS", "AI_AGENT_USAGE")
+SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS", "AI_AGENT_USAGE", "CODE_ANALYSIS")
 
 # RESULT_ACK 수신 후 재수신 대비 보관 기간
 PROCESSED_TASK_RETENTION_S = 60 * 60
@@ -60,6 +66,8 @@ class ContractAgentOptions:
     # 검색 대상 폴더 목록(정적 설정) — 등록 UI는 아직 없어서 지금은 시작 시 고정 목록만 지원
     search_folders: list = field(default_factory=list)
     file_index_store: Optional[FileIndexStore] = None
+    # CODE_ANALYSIS 대상 프로젝트 폴더 목록(정적 설정) — search_folders와 같은 이유로 등록 UI 없음
+    project_workspaces: list[ProjectWorkspaceConfig] = field(default_factory=list)
 
 
 class ContractAgent:
@@ -282,11 +290,20 @@ class ContractAgent:
 
     def _build_ready(self) -> dict:
         search_folders = self._options.file_index_store.list_search_folders() if self._options.file_index_store else []
+        project_workspaces = [
+            dict(
+                workspaceId=workspace.workspace_id,
+                displayName=workspace.display_name,
+                workspaceType=workspace.workspace_type,
+                availableCodeAdapters=list(workspace.available_code_adapters),
+            )
+            for workspace in self._options.project_workspaces
+        ]
         return dict(
             maxConcurrentTasks=1,
             supportedTaskTypes=list(SUPPORTED_TASK_TYPES),
             searchFolders=search_folders,
-            projectWorkspaces=[],
+            projectWorkspaces=project_workspaces,
         )
 
     def _send_heartbeat(self, socket) -> None:
@@ -423,7 +440,27 @@ class ContractAgent:
                 return "INVALID_PARAMETERS"
             if COLLECTORS[provider]() is None:
                 return "CODE_AGENT_NOT_CONFIGURED"
+        if message["taskType"] == "CODE_ANALYSIS":
+            workspace = self._find_project_workspace(message["parameters"].get("workspaceId"))
+            if workspace is None:
+                return "WORKSPACE_NOT_FOUND"
+            code_adapter = self._resolve_code_adapter(workspace, message["parameters"].get("codeAdapter"))
+            if code_adapter is None:
+                return "CODE_AGENT_NOT_CONFIGURED"
         return None
+
+    def _find_project_workspace(self, workspace_id: Optional[str]) -> Optional[ProjectWorkspaceConfig]:
+        return next((w for w in self._options.project_workspaces if w.workspace_id == workspace_id), None)
+
+    def _resolve_code_adapter(self, workspace: ProjectWorkspaceConfig, requested: Optional[str]) -> Optional[str]:
+        # 요청에 codeAdapter가 없으면 그 워크스페이스가 지원하는 첫 번째 어댑터를 기본으로 쓴다.
+        candidate = requested or (workspace.available_code_adapters[0] if workspace.available_code_adapters else None)
+        if candidate is None or candidate not in workspace.available_code_adapters:
+            return None
+        check = CODE_ADAPTER_AVAILABILITY_CHECKS.get(candidate)
+        if check is None or not check():
+            return None
+        return candidate
 
     def _execute_task(self, message: dict) -> dict:
         try:
@@ -436,6 +473,12 @@ class ContractAgent:
             if message["taskType"] == "AI_AGENT_USAGE":
                 provider = message["parameters"]["provider"]
                 return {"ok": True, "result": COLLECTORS[provider]()}
+            if message["taskType"] == "CODE_ANALYSIS":
+                workspace = self._find_project_workspace(message["parameters"].get("workspaceId"))
+                code_adapter = self._resolve_code_adapter(workspace, message["parameters"].get("codeAdapter"))
+                query = str(message["parameters"].get("query", ""))
+                result = CODE_ADAPTER_RUNNERS[code_adapter](Path(workspace.root_path), query)
+                return {"ok": True, "result": result}
             return {
                 "ok": False,
                 "error": {"code": "TASK_TYPE_NOT_SUPPORTED", "message": "unsupported task type", "retryable": False},
