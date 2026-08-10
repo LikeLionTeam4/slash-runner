@@ -32,8 +32,9 @@ from .protocol import (
     now_iso_kst,
 )
 from .system_status import collect_system_status
+from .usage_adapters import COLLECTORS
 
-SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS")
+SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS", "AI_AGENT_USAGE")
 
 # RESULT_ACK 수신 후 재수신 대비 보관 기간
 PROCESSED_TASK_RETENTION_S = 60 * 60
@@ -416,6 +417,12 @@ class ContractAgent:
             store = self._options.file_index_store
             if not isinstance(search_folder_id, str) or store is None or not store.is_searchable(search_folder_id):
                 return "SEARCH_FOLDER_NOT_FOUND"
+        if message["taskType"] == "AI_AGENT_USAGE":
+            provider = message["parameters"].get("provider")
+            if provider not in COLLECTORS:
+                return "INVALID_PARAMETERS"
+            if COLLECTORS[provider]() is None:
+                return "CODE_AGENT_NOT_CONFIGURED"
         return None
 
     def _execute_task(self, message: dict) -> dict:
@@ -426,6 +433,9 @@ class ContractAgent:
                 query = str(message["parameters"].get("query", ""))
                 search_folder_id = str(message["parameters"].get("searchFolderId", ""))
                 return {"ok": True, "result": self._options.file_index_store.search(search_folder_id, query)}
+            if message["taskType"] == "AI_AGENT_USAGE":
+                provider = message["parameters"]["provider"]
+                return {"ok": True, "result": COLLECTORS[provider]()}
             return {
                 "ok": False,
                 "error": {"code": "TASK_TYPE_NOT_SUPPORTED", "message": "unsupported task type", "retryable": False},
