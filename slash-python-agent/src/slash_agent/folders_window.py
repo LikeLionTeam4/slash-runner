@@ -26,6 +26,12 @@ import webview
 from .resources import resource_path
 
 HTML_PATH = resource_path("folders_window.html")
+# url=file://...로 넘기면 macOS(cocoa.py)가 loadRequest_()로 그냥 쏘는데, 이건 WKWebView가
+# 특정 조건(패키징된 ad-hoc 서명 앱 등)에서 조용히 실패해 완전히 빈 창만 뜬다 — 실측으로 확인한
+# 버그(색인 폴더 창이 검은 화면만 뜨는 문제). html=로 문자열 자체를 넘기면 loadHTMLString_baseURL_
+# 을 쓰는데, 이건 file:// 로딩 제약이 없어서 안전하다. 이 HTML은 외부 리소스 참조가 없어(전부
+# 인라인 CSS/JS) 이렇게 바꿔도 잃는 게 없다.
+HTML_CONTENT = HTML_PATH.read_text(encoding="utf-8")
 # webview.start(icon=...)를 안 넘기면 WinForms(Windows)·Cocoa(macOS) 백엔드 둘 다
 # sys.executable(개발 모드에서는 python.exe)에서 아이콘을 뽑아써서, 이 창의 작업표시줄/Dock
 # 아이콘이 우리 로고가 아니라 파이썬 기본 아이콘으로 뜬다(winforms.py·cocoa.py 실측 확인).
@@ -99,7 +105,7 @@ def run(config_path_str: str) -> int:
     api = Api(Path(config_path_str))
     api.window = webview.create_window(
         "색인 폴더 관리",
-        url=HTML_PATH.as_uri(),
+        html=HTML_CONTENT,
         js_api=api,
         width=520,
         height=460,
