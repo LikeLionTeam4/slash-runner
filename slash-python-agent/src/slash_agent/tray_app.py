@@ -24,6 +24,7 @@ from typing import Optional
 import pystray
 from PIL import Image
 
+from . import single_instance
 from .agent import ContractAgent, ContractAgentOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
@@ -277,6 +278,8 @@ def _hide_dock_icon() -> None:
 
 
 def main() -> None:
+    if not single_instance.acquire():
+        return
     app = TrayApp()
     app.icon.run(setup=app.setup)
 
