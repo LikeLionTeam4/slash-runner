@@ -44,6 +44,7 @@
     margin-bottom: 16px;
   }
   .new-btn:hover { background: var(--surface-raised); color: var(--foreground); border-color: var(--focus); }
+  .new-btn:disabled { opacity: 0.5; cursor: default; pointer-events: none; }
 
   .list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
   /* WKWebView는 WebKit 스크롤바 확장 pseudo-element를 지원 — 기본 회색 막대 대신 토큰에 맞춘 모양으로 */
@@ -121,7 +122,7 @@
 <body>
   <h1>색인 폴더 관리</h1>
   <p class="hint">에이전트가 로컬에서 검색할 폴더 목록입니다. "확인"을 눌러야 실제로 적용됩니다.</p>
-  <button class="new-btn" onclick="onNew()">+ 새 폴더 추가</button>
+  <button class="new-btn" id="newBtn" onclick="onNew()">+ 새 폴더 추가</button>
   <div class="list" id="list"></div>
   <div class="footer">
     <button class="secondary" onclick="onCancel()">취소</button>
@@ -158,10 +159,20 @@
   }
 
   async function onNew() {
-    const picked = await window.pywebview.api.pick_folder();
-    if (!picked) return;
-    folders.push({ searchFolderId: null, displayName: picked.suggestedDisplayName, rootPath: picked.rootPath });
-    render();
+    // pywebview는 파일 선택 창 호출마다 파이썬 스레드를 새로 띄우는데, 창이 닫히기 전에
+    // 중복 호출하면 내부적으로 세마포어를 공유해서 스레드가 영원히 응답을 못 받고 멈춘다
+    // (실측 확인 — 응답없음으로 이어짐). 요청이 끝날 때까지 버튼을 눌러도 반응 안 하게 막는다.
+    const btn = document.getElementById("newBtn");
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const picked = await window.pywebview.api.pick_folder();
+      if (!picked) return;
+      folders.push({ searchFolderId: null, displayName: picked.suggestedDisplayName, rootPath: picked.rootPath });
+      render();
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function onRename(index, value) {
