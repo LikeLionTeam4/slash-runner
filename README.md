@@ -84,11 +84,26 @@ pyinstaller slash_agent_windows.spec
 
 - 결과물: `slash-python-agent/dist/SlashAgent/SlashAgent.exe`
 - 트레이(`pystray`)·색인 폴더 관리 창(`pywebview`, WebView2)은 macOS와 같은 코드를 그대로
-  쓴다 — 다만 **이 스펙은 macOS에서 작성만 했고 PyInstaller는 크로스 컴파일을 지원하지
-  않아, 실제 Windows에서의 빌드·실행 검증은 아직 못했다**(알려진 한계 — Windows 개발
-  환경이 없어서). Windows에서 처음 빌드할 때 `hiddenimports`(특히 `pywebview`의
-  EdgeChromium/WebView2 백엔드)가 부족해서 실패할 가능성이 있으니 에러 메시지를 보고
-  스펙을 조정해야 할 수 있다.
+  쓴다.
+- **Windows 11(10.0.26200)에서 실제 빌드·실행 검증 완료** — `pip install -e ".[build,test]"`,
+  `pytest`(49개 통과), 개발 모드 실행(Mac의 mock-api에 LAN으로 페어링·READY 확인), 그리고
+  이 스펙으로 `pyinstaller slash_agent_windows.spec` 빌드까지 전부 확인했다. 현재
+  `hiddenimports` 목록으로 **첫 시도에 빌드 성공** — 추가 조정이 필요 없었다.
+- 검증 중 발견해 고친 버그 두 가지(Windows에서 발견했지만 코드가 공통이라 macOS에도
+  같이 적용됨):
+  1. `folders_window.py`가 `webview.start()`에 아이콘을 안 넘겨서, 색인 폴더 관리 창의
+     작업표시줄/Dock 아이콘이 앱 로고 대신 `sys.executable`(개발 모드는 python.exe) 아이콘으로
+     떴다 — `winforms.py`·`cocoa.py` 백엔드 둘 다 이 폴백을 갖고 있어 macOS에서도 같은
+     문제가 있었지만 Dock이 숨겨져 있어 못 보고 지나쳤다. `AppIcon.ico`/`AppIcon.icns`를
+     명시적으로 넘기도록 고쳤다.
+  2. `tray_app.py`의 `quit_app()`이 색인 폴더 관리 창(별도 프로세스)의 핸들을 갖고 있지
+     않아서, 그 창을 띄운 채로 트레이에서 종료하면 창이 안 닫히고 남아있었다 — 핸들을
+     저장해 종료 시 같이 정리하도록 고쳤다.
+- 한 가지 참고 사항(코드 버그는 아님): 개발 모드로 띄운 `python -m slash_agent.tray_app`을
+  정리하지 않은 채 패키징된 `SlashAgent.exe`를 실행하면, 둘이 WebView2 사용자 데이터
+  폴더를 공유해서 색인 폴더 관리 창을 열 때 한 번 죽는 걸 확인했다 — 이전 인스턴스의
+  `msedgewebview2.exe` 잔여 프로세스를 정리하고 다시 실행하면 재현되지 않았다. 개발 모드와
+  패키징된 실행 파일을 동시에 띄우지 않으면 문제없다.
 
 ## 설정
 
@@ -113,8 +128,8 @@ Windows는 애초에 이런 개념이 없어 해당 없음).
 스레드 이벤트루프를 동시에 못 써서) — `search-folders.json` 파일을 통해 실행 중인 트레이 앱과
 동기화된다(2초 주기로 변경 감지).
 
-> Windows 지원은 트레이 코드(`pystray`)까지는 macOS와 공통이지만, 실제 Windows 환경에서의
-> 패키징·실행 검증은 아직 못했다(이 개발 환경이 macOS뿐이라) — 알려진 한계로 남겨둔다.
+> Windows 11에서 개발 모드 실행·PyInstaller 패키징·`SlashAgent.exe` 실행까지 실제로
+> 검증했다(위 "빌드해서 실행파일 만들기 (PyInstaller) > Windows" 절 참고).
 
 ## 메시지 프로토콜
 
@@ -228,10 +243,8 @@ SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EX
 
 ## 알려진 한계
 
-- Apple Silicon(arm64) macOS에서만 실제로 빌드·시험했다. Intel Mac은 코드는 호환되지만
-  별도 빌드 환경이 없어 빌드·시험을 못했고, Windows는 코드(`pystray`+`%APPDATA%` 경로
-  분기)까지는 macOS와 공통이지만 `slash_agent_windows.spec`은 Windows 개발 환경이 없어
-  실제 빌드·실행 검증을 못한 상태다(둘 다 알려진 한계).
+- Apple Silicon(arm64) macOS와 Windows 11에서 실제로 빌드·시험했다. Intel Mac은 코드는
+  호환되지만 별도 빌드 환경이 없어 빌드·시험을 못했다(알려진 한계).
 - Apple Developer ID 서명·공증(notarization)은 하지 않았다 — 배포하려면 별도로 필요하다.
 - `FILE_SEARCH`의 기본 검색 폴더는 시험용 Fixture(`fixtures/search-folder`)다. 사용자가 색인 폴더
   관리 창으로 폴더를 직접 추가할 수는 있지만, `slash-api`가 여러 폴더 중 검색 대상을 자동으로

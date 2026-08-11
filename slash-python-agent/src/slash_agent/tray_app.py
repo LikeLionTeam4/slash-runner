@@ -24,6 +24,7 @@ from typing import Optional
 import pystray
 from PIL import Image
 
+from . import single_instance
 from .agent import ContractAgent, ContractAgentOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
@@ -119,6 +120,7 @@ class TrayApp:
         self.file_index_store: Optional[FileIndexStore] = None
         self.current_config: dict = {}
         self._search_folders_mtime: Optional[float] = None
+        self.folders_window_proc: Optional[subprocess.Popen] = None
         self._status_text = "상태: 연결 중..."
         self._device_text = "기기 ID: -"
         self._api_text = "mock-api: -"
@@ -220,7 +222,7 @@ class TrayApp:
         if not SEARCH_FOLDERS_PATH.exists():
             SEARCH_FOLDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
             SEARCH_FOLDERS_PATH.write_text(json.dumps(_load_search_folders(), ensure_ascii=False, indent=2), encoding="utf-8")
-        subprocess.Popen(_folders_window_command())
+        self.folders_window_proc = subprocess.Popen(_folders_window_command())
 
     def open_config_folder(self, icon, item) -> None:
         if sys.platform == "win32":
@@ -234,6 +236,9 @@ class TrayApp:
             self.agent.stop()
         if self.file_index_store is not None:
             self.file_index_store.close()
+        # 색인 폴더 관리 창은 별도 프로세스라 트레이가 죽어도 저절로 안 닫힌다 — 열려 있으면 같이 정리.
+        if self.folders_window_proc is not None and self.folders_window_proc.poll() is None:
+            self.folders_window_proc.terminate()
         icon.stop()
 
     def setup(self, icon) -> None:
@@ -273,6 +278,8 @@ def _hide_dock_icon() -> None:
 
 
 def main() -> None:
+    if not single_instance.acquire():
+        return
     app = TrayApp()
     app.icon.run(setup=app.setup)
 
