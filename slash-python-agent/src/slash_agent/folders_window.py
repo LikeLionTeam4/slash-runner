@@ -26,6 +26,10 @@ import webview
 from .resources import resource_path
 
 HTML_PATH = resource_path("folders_window.html")
+# webview.start(icon=...)를 안 넘기면 WinForms(Windows)·Cocoa(macOS) 백엔드 둘 다
+# sys.executable(개발 모드에서는 python.exe)에서 아이콘을 뽑아써서, 이 창의 작업표시줄/Dock
+# 아이콘이 우리 로고가 아니라 파이썬 기본 아이콘으로 뜬다(winforms.py·cocoa.py 실측 확인).
+APP_ICON_PATH = resource_path("assets", "AppIcon.ico" if sys.platform == "win32" else "AppIcon.icns")
 
 
 def load_folders(path: Path) -> list[dict]:
@@ -103,7 +107,7 @@ def run(config_path_str: str) -> int:
         background_color="#0a0c14",
     )
     _hide_dock_icon()
-    webview.start()
+    webview.start(icon=str(APP_ICON_PATH) if APP_ICON_PATH.exists() else None)
     return 0 if api.applied else 1
 
 
