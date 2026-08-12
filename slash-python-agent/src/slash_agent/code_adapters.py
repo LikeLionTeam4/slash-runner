@@ -22,10 +22,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .protocol import now_iso_kst
 
@@ -112,53 +113,89 @@ def run_claude_code_analysis(workspace_path: Path, query: str, timeout_s: int = 
     }
 
 
-def _parse_codex_output(stdout: str) -> tuple[str, Optional[int]]:
-    last_message: Optional[str] = None
-    turn_count = 0
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict) or event.get("type") != "item.completed":
-            continue
-        item = event.get("item")
-        if isinstance(item, dict) and item.get("type") == "agent_message":
-            text = item.get("text")
-            if isinstance(text, str):
-                last_message = text
-                turn_count += 1
-
-    if last_message is None:
-        return stdout.strip(), None
-    return last_message, turn_count
+def _parse_codex_event_line(line: str) -> Optional[str]:
+    """한 줄이 완료된 agent_message 이벤트면 그 텍스트를, 아니면 None을 돌려준다."""
+    stripped = line.strip()
+    if not stripped:
+        return None
+    try:
+        event = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, dict) or event.get("type") != "item.completed":
+        return None
+    item = event.get("item")
+    if not isinstance(item, dict) or item.get("type") != "agent_message":
+        return None
+    text = item.get("text")
+    return text if isinstance(text, str) else None
 
 
-def run_codex_analysis(workspace_path: Path, query: str, timeout_s: int = _DEFAULT_TIMEOUT_S) -> dict:
+def run_codex_analysis(
+    workspace_path: Path,
+    query: str,
+    timeout_s: int = _DEFAULT_TIMEOUT_S,
+    on_turn_complete: Optional[Callable[[int], None]] = None,
+) -> dict:
+    """codex exec을 실행한다. `--json`이 NDJSON을 한 줄씩 찍어주므로 Popen으로 스트리밍
+    읽어 턴이 끝날 때마다(item.completed/agent_message) on_turn_complete를 즉시 호출한다 —
+    타이머 기반 추정치보다 실제 진행 상황에 가까운 신호를 제공하기 위함(agent.py의
+    _progress_ticker와 별개로, CODEX 어댑터에서만 추가로 쓰인다).
+    """
     if not codex_available():
         raise CodeAdapterNotConfiguredError("codex CLI가 PATH에 없습니다")
 
     started = time.monotonic()
     args = ["codex", "exec", "--sandbox", "read-only", "--json", query]
     try:
-        proc = subprocess.run(args, cwd=str(workspace_path), capture_output=True, text=True, timeout=timeout_s)
+        proc = subprocess.Popen(
+            args, cwd=str(workspace_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+        )
     except FileNotFoundError as e:
         raise CodeAdapterNotConfiguredError(str(e)) from e
-    except subprocess.TimeoutExpired as e:
-        raise CodeAdapterError(f"시간 초과({timeout_s}초)") from e
+
+    # subprocess.run(timeout=...)와 달리 스트리밍 읽기(for line in proc.stdout)는 그 자체로
+    # 시간 제한이 없다 — CLI가 멈추면 루프가 그냥 무한 대기한다. 별도 타이머로 강제 종료한다.
+    timed_out = threading.Event()
+
+    def _kill_on_timeout() -> None:
+        timed_out.set()
+        proc.kill()
+
+    timer = threading.Timer(timeout_s, _kill_on_timeout)
+    timer.start()
+
+    stdout_lines: list[str] = []
+    last_message: Optional[str] = None
+    turn_count = 0
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            stdout_lines.append(line)
+            text = _parse_codex_event_line(line)
+            if text is None:
+                continue
+            last_message = text
+            turn_count += 1
+            if on_turn_complete is not None:
+                on_turn_complete(turn_count)
+        proc.wait()
+    finally:
+        timer.cancel()
+
+    if timed_out.is_set():
+        raise CodeAdapterError(f"시간 초과({timeout_s}초)")
 
     duration_ms = int((time.monotonic() - started) * 1000)
     if proc.returncode != 0:
-        raise CodeAdapterError((proc.stderr or proc.stdout or f"종료 코드 {proc.returncode}")[:2000])
+        stderr_output = proc.stderr.read() if proc.stderr else ""
+        raise CodeAdapterError((stderr_output or "".join(stdout_lines) or f"종료 코드 {proc.returncode}")[:2000])
 
-    summary, turns = _parse_codex_output(proc.stdout)
+    summary = last_message if last_message is not None else "".join(stdout_lines).strip()
     return {
         "codeAdapter": "CODEX",
         "summary": summary,
-        "turns": turns,
+        "turns": turn_count if last_message is not None else None,
         "durationMs": duration_ms,
         "collectedAt": now_iso_kst(),
     }

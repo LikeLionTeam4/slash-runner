@@ -444,7 +444,7 @@ class ContractAgent:
             dispatchId=message["dispatchId"],
             correlationId=message["correlationId"],
             stage="EXECUTING",
-            percent=50,
+            percent=0,
         )
 
         self._running_task_id = message["taskId"]
@@ -454,7 +454,7 @@ class ContractAgent:
         )
         progress_thread.start()
         try:
-            outcome = self._execute_task(message)
+            outcome = self._execute_task(socket, message)
         finally:
             progress_stop.set()
             progress_thread.join(timeout=2.0)
@@ -487,7 +487,7 @@ class ContractAgent:
         # 정확한 진행률은 계산할 방법이 없다(LLM 호출이 얼마나 남았는지 알 수 없음) — 그래도
         # 완료될 때까지 주기적으로 신호를 보내 "멈춘 게 아니라 계속 일하고 있다"는 것만이라도
         # 알린다. 100은 실제 완료 시 RESULT로만 도달하게 90에서 멈춘다.
-        percent = 50
+        percent = 0
         while not stop_event.wait(PROGRESS_TICK_INTERVAL_S):
             percent = min(90, percent + 10)
             try:
@@ -502,6 +502,24 @@ class ContractAgent:
                 )
             except ConnectionClosed:
                 return
+
+    def _send_turn_progress(self, socket, message: dict, turn: int) -> None:
+        # CODEX 어댑터는 item.completed 이벤트로 턴 완료를 실시간으로 알 수 있어, 15초
+        # 타이머보다 실제 진행 상황에 가까운 신호를 추가로 보낸다. 총 턴 수는 여전히 알 수
+        # 없어 근사치인 건 같다 — _progress_ticker와 같은 0 기준·10단위·90 상한 규칙을 맞춘다.
+        percent = min(90, turn * 10)
+        try:
+            self._send(
+                socket,
+                "PROGRESS",
+                taskId=message["taskId"],
+                dispatchId=message["dispatchId"],
+                correlationId=message["correlationId"],
+                stage="EXECUTING",
+                percent=percent,
+            )
+        except ConnectionClosed:
+            pass
 
     def _validate_task(self, message: dict) -> Optional[str]:
         if message["taskType"] not in SUPPORTED_TASK_TYPES:
@@ -544,7 +562,7 @@ class ContractAgent:
             return None
         return candidate
 
-    def _execute_task(self, message: dict) -> dict:
+    def _execute_task(self, socket, message: dict) -> dict:
         try:
             if message["taskType"] == "SYSTEM_STATUS":
                 return {"ok": True, "result": collect_system_status()}
@@ -559,7 +577,10 @@ class ContractAgent:
                 workspace = self._find_project_workspace(message["parameters"].get("workspaceId"))
                 code_adapter = self._resolve_code_adapter(workspace, message["parameters"].get("codeAdapter"))
                 query = str(message["parameters"].get("query", ""))
-                result = CODE_ADAPTER_RUNNERS[code_adapter](Path(workspace.root_path), query)
+                extra_kwargs = {}
+                if code_adapter == "CODEX":
+                    extra_kwargs["on_turn_complete"] = lambda turn: self._send_turn_progress(socket, message, turn)
+                result = CODE_ADAPTER_RUNNERS[code_adapter](Path(workspace.root_path), query, **extra_kwargs)
                 return {"ok": True, "result": result}
             return {
                 "ok": False,
