@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -85,14 +86,21 @@ def main() -> None:
     agent.wait_until_ready(20.0)
     _log(f"[slash-agent] READY (deviceId={agent.get_device_id()})")
 
+    # signal.pause()는 안 된다 — CODE_ANALYSIS처럼 백그라운드 스레드에서 subprocess를 띄우는
+    # 작업이 끝나면 그 자식 프로세스 종료(SIGCHLD)만으로도 조기에 깨어나 버린다(실제로 겪은
+    # 문제 — 재현 스크립트로 확인함: 등록한 핸들러가 하나도 안 불렸는데도 pause()가 그냥
+    # 반환된다). "실제로 종료 신호를 받았을 때만" 끝나도록 직접 관리하는 Event를 쓴다.
+    shutdown_event = threading.Event()
+
     def _shutdown(signum, frame):
-        agent.stop()
-        file_index_store.close()
-        sys.exit(0)
+        shutdown_event.set()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
-    signal.pause()
+    shutdown_event.wait()
+    agent.stop()
+    file_index_store.close()
+    sys.exit(0)
 
 
 if __name__ == "__main__":

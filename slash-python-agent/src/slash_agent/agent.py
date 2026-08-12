@@ -83,6 +83,17 @@ class ContractAgent:
         self._result_cache: dict[str, dict] = {}
         self._ready_waiters: list[threading.Event] = []
         self._thread: Optional[threading.Thread] = None
+        # CODE_ANALYSIS 같은 긴 작업은 _execute_task가 연결 루프를 동기로 몇십 초~5분씩 막는다
+        # — 그동안 HEARTBEAT도 못 나가는데, api 쪽에 하트비트 끊긴 기기를 OFFLINE으로 내리는
+        # 배치(markOfflineWhenHeartbeatStale)가 나중에 켜지면 작업 중인 기기를 죽은 걸로
+        # 오판할 수 있다. 그래서 하트비트는 별도 스레드로 돌려 작업 실행과 무관하게 계속 나가게
+        # 한다. 소켓 하나를 두 스레드(이 스레드 + 연결 루프)가 같이 쓰므로 전송에 락이 필요하다.
+        self._send_lock = threading.Lock()
+        self._heartbeat_stop: Optional[threading.Event] = None
+        # 작업은 한 번에 하나만 처리한다(READY의 maxConcurrentTasks=1과 일치) — 서버가 기기당
+        # 활성 전달을 하나로 제한해서 정상 흐름에서는 겹칠 일이 없지만, 방어적으로 락을 건다.
+        self._task_lock = threading.Lock()
+        self._running_task_id: Optional[str] = None
 
     def get_state(self) -> str:
         return self._state
@@ -252,12 +263,16 @@ class ContractAgent:
         self._state = "CONNECTING"
         socket = ws_client.connect(ws_url, additional_headers={"Authorization": f"Bearer {self._device_token}"})
         self._socket = socket
+        self._heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop, args=(socket, self._heartbeat_stop), daemon=True
+        )
+        heartbeat_thread.start()
         try:
             self._reconnect_attempt = 0
             self._state = "AUTHENTICATING"
             self._send(socket, "HELLO", **self._build_hello())
 
-            last_heartbeat = time.monotonic()
             while not self._stopped:
                 try:
                     raw = socket.recv(timeout=1.0)
@@ -268,15 +283,28 @@ class ContractAgent:
 
                 if raw is not None:
                     self._handle_message(socket, raw)
-
-                if self._state == "READY" and time.monotonic() - last_heartbeat > self._options.heartbeat_interval_s:
-                    self._send_heartbeat(socket)
-                    last_heartbeat = time.monotonic()
         finally:
+            self._heartbeat_stop.set()
+            heartbeat_thread.join(timeout=2.0)
             self._socket = None
 
+    def _heartbeat_loop(self, socket, stop_event: threading.Event) -> None:
+        # 연결 루프와 별도 스레드로 돈다 — CODE_ANALYSIS처럼 몇십 초~5분 걸리는 작업이
+        # 백그라운드 스레드에서 도는 동안에도(아래 _handle_message의 TASK 분기 참고)
+        # 하트비트는 끊기지 않고 계속 나가야, api 쪽 하트비트 만료 판정이 실행 중인 기기를
+        # 죽은 걸로 오판하지 않는다.
+        while not stop_event.wait(self._options.heartbeat_interval_s):
+            if self._state != "READY":
+                continue
+            try:
+                self._send_heartbeat(socket)
+            except Exception as e:
+                self._log(f"하트비트 전송 실패: {e}")
+                return
+
     def _send(self, socket, message_type: str, **fields) -> None:
-        socket.send(json.dumps(envelope(message_type, **fields)))
+        with self._send_lock:
+            socket.send(json.dumps(envelope(message_type, **fields)))
 
     def _build_hello(self) -> dict:
         return dict(
@@ -314,7 +342,7 @@ class ContractAgent:
             deviceId=self._device_id,
             cpuPercent=status["cpuPercent"],
             memoryPercent=status["memoryPercent"],
-            runningTaskId=None,
+            runningTaskId=self._running_task_id,
         )
 
     def _fire_ready_waiters(self) -> None:
@@ -359,8 +387,24 @@ class ContractAgent:
             return
 
         if msg_type == "TASK":
-            self._handle_task(socket, message)
+            # 여기서 바로 처리하면 CODE_ANALYSIS 같은 긴 작업이 연결 루프 자체를 막아서, 그동안
+            # 다른 메시지도 못 받고(다만 서버가 기기당 활성 전달을 하나로 제한해 정상 흐름에서
+            # 겹칠 일은 없다) 무엇보다 하트비트 스레드 쪽 상태 반영이 늦어진다 — 별도 스레드로
+            # 넘겨서 연결 루프는 계속 수신 대기 상태를 유지하게 한다. _task_lock으로 직렬화하므로
+            # maxConcurrentTasks=1은 그대로 지켜진다.
+            threading.Thread(target=self._run_task, args=(socket, message), daemon=True).start()
             return
+
+    def _run_task(self, socket, message: dict) -> None:
+        # 백그라운드 스레드라 연결이 끊긴 뒤에도 이 스레드는 옛 소켓 참조를 들고 있을 수 있다
+        # — 그 사이 연결 루프가 먼저 끊김을 감지해 재연결로 넘어가면 여기서 보내는 ACK/RESULT는
+        # 닫힌 소켓에 쓰는 꼴이 된다. 처리 자체(캐시 반영 등)는 이미 끝났을 수 있고, 못 보낸
+        # 메시지는 재연결 후 _resend_unacked_results가 다시 보내므로 여기서는 조용히 넘어간다.
+        try:
+            with self._task_lock:
+                self._handle_task(socket, message)
+        except ConnectionClosed as e:
+            self._log(f"작업 응답 전송 중 연결 끊김(재연결 후 재전송됨): {e}")
 
     # ---- TASK 처리 ----
 
@@ -399,7 +443,11 @@ class ContractAgent:
             percent=50,
         )
 
-        outcome = self._execute_task(message)
+        self._running_task_id = message["taskId"]
+        try:
+            outcome = self._execute_task(message)
+        finally:
+            self._running_task_id = None
         finished_at = now_iso_kst()
         result_fields = dict(
             taskId=message["taskId"],
@@ -411,8 +459,10 @@ class ContractAgent:
             startedAt=started_at,
             finishedAt=finished_at,
         )
-        self._send(socket, "RESULT", **result_fields)
-
+        # 캐시에 먼저 남기고 나서 보낸다 — 순서를 반대로 하면 전송이 끊긴 연결 때문에 실패할 때
+        # (아래 _run_task가 ConnectionClosed를 잡아 조용히 넘어가는 경우) 결과가 캐시에 없어서
+        # 재연결 후 _resend_unacked_results가 재전송할 대상 자체가 없어진다 — 작업이 유실된
+        # 것처럼 보인다. 먼저 캐시해두면 전송이 몇 번을 실패해도 재연결 시 반드시 다시 나간다.
         self._result_cache[key] = {
             "ack": ack_fields,
             "result": result_fields,
@@ -420,6 +470,7 @@ class ContractAgent:
             "completed_at": finished_at,
         }
         self._persist_result_cache()
+        self._send(socket, "RESULT", **result_fields)
 
     def _validate_task(self, message: dict) -> Optional[str]:
         if message["taskType"] not in SUPPORTED_TASK_TYPES:
