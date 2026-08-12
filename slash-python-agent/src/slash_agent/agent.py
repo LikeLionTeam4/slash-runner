@@ -45,6 +45,10 @@ SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS", "AI_AGE
 # RESULT_ACK 수신 후 재수신 대비 보관 기간
 PROCESSED_TASK_RETENTION_S = 60 * 60
 
+# 실행 중 진행률 보고 주기 — CODE_ANALYSIS처럼 오래 걸리는 작업(최대 300초)이 시작 시점의
+# PROGRESS(50%) 하나만 보내고 끝까지 조용하면 화면에서 멈춘 것처럼 보인다.
+PROGRESS_TICK_INTERVAL_S = 15.0
+
 
 def _iso_to_epoch(iso_str: str) -> float:
     return datetime.fromisoformat(iso_str).timestamp()
@@ -444,9 +448,16 @@ class ContractAgent:
         )
 
         self._running_task_id = message["taskId"]
+        progress_stop = threading.Event()
+        progress_thread = threading.Thread(
+            target=self._progress_ticker, args=(socket, message, progress_stop), daemon=True
+        )
+        progress_thread.start()
         try:
             outcome = self._execute_task(message)
         finally:
+            progress_stop.set()
+            progress_thread.join(timeout=2.0)
             self._running_task_id = None
         finished_at = now_iso_kst()
         result_fields = dict(
@@ -471,6 +482,26 @@ class ContractAgent:
         }
         self._persist_result_cache()
         self._send(socket, "RESULT", **result_fields)
+
+    def _progress_ticker(self, socket, message: dict, stop_event: threading.Event) -> None:
+        # 정확한 진행률은 계산할 방법이 없다(LLM 호출이 얼마나 남았는지 알 수 없음) — 그래도
+        # 완료될 때까지 주기적으로 신호를 보내 "멈춘 게 아니라 계속 일하고 있다"는 것만이라도
+        # 알린다. 100은 실제 완료 시 RESULT로만 도달하게 90에서 멈춘다.
+        percent = 50
+        while not stop_event.wait(PROGRESS_TICK_INTERVAL_S):
+            percent = min(90, percent + 10)
+            try:
+                self._send(
+                    socket,
+                    "PROGRESS",
+                    taskId=message["taskId"],
+                    dispatchId=message["dispatchId"],
+                    correlationId=message["correlationId"],
+                    stage="EXECUTING",
+                    percent=percent,
+                )
+            except ConnectionClosed:
+                return
 
     def _validate_task(self, message: dict) -> Optional[str]:
         if message["taskType"] not in SUPPORTED_TASK_TYPES:
