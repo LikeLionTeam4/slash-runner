@@ -7,6 +7,7 @@ Claude Code 쪽은 합성 픽스처 검증 외에, 이 머신의 실제 ~/.claud
 import json
 from pathlib import Path
 
+import slash_agent.usage_adapters as usage_adapters
 from slash_agent.usage_adapters import (
     _claude_code_root,
     _codex_root,
@@ -153,3 +154,63 @@ class TestCodexAdapter:
     def test_default_root_falls_back_to_home_dir(self, monkeypatch):
         monkeypatch.delenv("CODEX_HOME", raising=False)
         assert _codex_root() == Path.home() / ".codex" / "sessions"
+
+
+class TestUsageCache:
+    def test_repeated_call_within_ttl_does_not_reread_disk(self, tmp_path):
+        usage_adapters._cache.clear()
+        root = tmp_path / "projects"
+        write_jsonl(
+            root / "proj-a" / "session-1.jsonl",
+            [{"type": "assistant", "timestamp": "t1", "message": {"usage": {"input_tokens": 10, "output_tokens": 5}}}],
+        )
+
+        first = collect_claude_code_usage(root)
+        assert first["totalInputTokens"] == 10
+
+        # 캐시 TTL 안에서 파일이 바뀌어도(세션 추가) 재조회 결과는 캐시된 값 그대로다.
+        write_jsonl(
+            root / "proj-b" / "session-2.jsonl",
+            [{"type": "assistant", "timestamp": "t2", "message": {"usage": {"input_tokens": 999, "output_tokens": 999}}}],
+        )
+        second = collect_claude_code_usage(root)
+        assert second["totalInputTokens"] == 10
+        assert second is first
+
+    def test_call_after_ttl_expires_rereads_disk(self, tmp_path, monkeypatch):
+        usage_adapters._cache.clear()
+        root = tmp_path / "projects"
+        write_jsonl(
+            root / "proj-a" / "session-1.jsonl",
+            [{"type": "assistant", "timestamp": "t1", "message": {"usage": {"input_tokens": 10, "output_tokens": 5}}}],
+        )
+
+        fake_clock = [1000.0]
+        monkeypatch.setattr(usage_adapters.time, "monotonic", lambda: fake_clock[0])
+
+        first = collect_claude_code_usage(root)
+        assert first["totalInputTokens"] == 10
+
+        write_jsonl(
+            root / "proj-b" / "session-2.jsonl",
+            [{"type": "assistant", "timestamp": "t2", "message": {"usage": {"input_tokens": 999, "output_tokens": 999}}}],
+        )
+        fake_clock[0] += usage_adapters._CACHE_TTL_S + 1
+        second = collect_claude_code_usage(root)
+        assert second["totalInputTokens"] == 1009
+
+    def test_different_roots_are_cached_independently(self, tmp_path):
+        usage_adapters._cache.clear()
+        root_a = tmp_path / "a"
+        root_b = tmp_path / "b"
+        write_jsonl(
+            root_a / "proj" / "session.jsonl",
+            [{"type": "assistant", "timestamp": "t1", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}}],
+        )
+        write_jsonl(
+            root_b / "proj" / "session.jsonl",
+            [{"type": "assistant", "timestamp": "t1", "message": {"usage": {"input_tokens": 2, "output_tokens": 2}}}],
+        )
+
+        assert collect_claude_code_usage(root_a)["totalInputTokens"] == 1
+        assert collect_claude_code_usage(root_b)["totalInputTokens"] == 2
