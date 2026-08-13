@@ -5,9 +5,6 @@
 # 않아 실제 빌드·실행 검증은 Windows 머신에서 직접 해야 한다(아직 못함, 알려진 한계).
 #
 # 빌드(Windows에서): cd slash-python-pc-runner && pyinstaller slash_pc_runner_windows.spec
-#
-# 앱 표시 이름(SlashAgent)은 이번 macOS 우선 리네이밍 범위에서 제외했다 — Windows 실기기
-# 재검증 없이 표시 이름만 바꾸는 건 위험해서, macOS(Slash.app)와 맞추는 작업은 별도로 진행한다.
 
 from pathlib import Path
 
@@ -50,7 +47,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="SlashAgent",
+    name="Slash",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -67,5 +64,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="SlashAgent",
+    name="Slash",
 )
