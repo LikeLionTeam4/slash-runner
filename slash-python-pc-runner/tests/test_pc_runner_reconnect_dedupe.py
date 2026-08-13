@@ -135,6 +135,39 @@ def test_device_revoked_stops_agent_and_clears_identity(server):
         agent.stop()
 
 
+def test_device_revoked_processed_even_when_server_closes_immediately_after(server):
+    """PR #18 리뷰(kimkangchan) 지적 — 실제 slash-api(#27)는 DEVICE_REVOKED 프레임을 보낸
+    직후 곧바로 소켓을 닫는다(sendAndClose). 데이터 프레임과 close 프레임이 근접해 도착해도
+    websockets 클라이언트가 recv()로 그 메시지를 먼저 넘겨주는지 확인한다 — 만약 close가
+    먼저 처리되어 메시지가 유실되면 identity_store.clear()가 호출되지 않는다.
+    """
+    identity_store = MemoryIdentityStore()
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
+            api_base_url=server.url,
+            pairing_code="000000",
+            heartbeat_interval_s=60,
+            identity_store=identity_store,
+        )
+    )
+    agent.start()
+    agent.wait_until_ready()
+    try:
+        assert identity_store.current is not None
+
+        server.send_protocol_error("DEVICE_REVOKED", "device revoked", close_after=True)
+
+        deadline = time.monotonic() + 5
+        while agent.get_state() != "STOPPED":
+            if time.monotonic() > deadline:
+                raise TimeoutError("DEVICE_REVOKED 처리 대기 시간 초과 (close_after=True)")
+            time.sleep(0.05)
+
+        assert identity_store.current is None
+    finally:
+        agent.stop()
+
+
 def test_reconnect_backoff_grows_when_ready_never_reached(server):
     """slash-api#26 — 소켓 연결(101) 직후가 아니라 READY 도달 후에만 백오프를 리셋해야 한다.
 

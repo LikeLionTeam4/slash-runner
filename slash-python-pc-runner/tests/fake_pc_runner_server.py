@@ -313,14 +313,23 @@ class FakePcRunnerServer:
 
         asyncio.run_coroutine_threadsafe(_send(), self._loop).result(timeout=5)
 
-    def send_protocol_error(self, code: str, message_text: str = "") -> None:
-        """PROTOCOL_ERROR 프레임 전송 — DEVICE_REVOKED 등 서버발 오류 시나리오 재현용."""
+    def send_protocol_error(self, code: str, message_text: str = "", close_after: bool = False) -> None:
+        """PROTOCOL_ERROR 프레임 전송 — DEVICE_REVOKED 등 서버발 오류 시나리오 재현용.
+
+        close_after=True면 실제 slash-api의 DeviceService.revoke·WsMessageListener가
+        하는 것과 동일하게, 프레임을 보낸 직후 소켓을 곧바로 닫는다(close code 4400,
+        reason "DEVICE_REVOKED") — 데이터 프레임과 close 프레임이 근접해 도착할 때도
+        클라이언트 라이브러리가 메시지를 놓치지 않는지 확인하는 용도.
+        """
         if self._current_ws is None:
             raise RuntimeError("연결된 에이전트 소켓이 없습니다")
-        message = envelope("PROTOCOL_ERROR", code=code, message=message_text, relatedEventId=None, closeConnection=False)
+        message = envelope("PROTOCOL_ERROR", code=code, message=message_text, relatedEventId=None, closeConnection=close_after)
+        ws = self._current_ws
 
         async def _send():
-            await self._current_ws.send_str(json.dumps(message))
+            await ws.send_str(json.dumps(message))
+            if close_after:
+                await ws.close(code=4400, message=b"DEVICE_REVOKED")
 
         asyncio.run_coroutine_threadsafe(_send(), self._loop).result(timeout=5)
 
