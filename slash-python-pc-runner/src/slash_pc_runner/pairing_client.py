@@ -47,7 +47,7 @@ def pair_agent(
             "os": "MACOS",
             "architecture": _architecture(),
             "osVersion": platform.platform(),
-            "agentVersion": "slash-pc-runner-py/0.1.0",
+            "agentVersion": "slash-pc-runner-py/0.3.0",
         },
         "supportedTaskTypes": supported_task_types,
     }

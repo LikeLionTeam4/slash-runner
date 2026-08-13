@@ -358,7 +358,7 @@ class ContractPcRunner:
     def _build_hello(self) -> dict:
         return dict(
             deviceId=self._device_id,
-            agentVersion="slash-pc-runner-py/0.1.0",
+            agentVersion="slash-pc-runner-py/0.3.0",
             os="MACOS",
             architecture="ARM64" if platform.machine() in ("arm64", "aarch64") else "X86_64",
             osVersion=platform.platform(),
