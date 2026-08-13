@@ -53,6 +53,9 @@ class FakePcRunnerServer:
         self.pairing_sessions: dict[str, dict] = {}
         self.ready_count = 0
         self.auto_ack_result = True
+        # True면 HELLO를 받고도 CHALLENGE 없이 바로 닫는다 — 해제된 기기가 소켓 연결(101)
+        # 이후 인증 단계에서 매번 거부당하는 상황(백오프 리셋 위치 회귀 시험용) 재현
+        self.reject_hello = False
         # 지정 시 이 코드만 페어링 성공, 나머지는 PAIRING_CODE_INVALID(None = 전부 허용)
         self.accepted_pairing_code: Optional[str] = None
 
@@ -198,6 +201,9 @@ class FakePcRunnerServer:
 
             if msg_type == "HELLO":
                 hello_device_id = message["deviceId"]
+                if self.reject_hello:
+                    await ws.close()
+                    break
                 challenge_id = str(uuid.uuid4())
                 nonce = base64.b64encode(str(uuid.uuid4()).encode()).decode()
                 challenge = {"challengeId": challenge_id, "nonce": nonce}
@@ -301,6 +307,17 @@ class FakePcRunnerServer:
             expiresAt=expires_at,
             payloadSha256="0" * 64,
         )
+
+        async def _send():
+            await self._current_ws.send_str(json.dumps(message))
+
+        asyncio.run_coroutine_threadsafe(_send(), self._loop).result(timeout=5)
+
+    def send_protocol_error(self, code: str, message_text: str = "") -> None:
+        """PROTOCOL_ERROR 프레임 전송 — DEVICE_REVOKED 등 서버발 오류 시나리오 재현용."""
+        if self._current_ws is None:
+            raise RuntimeError("연결된 에이전트 소켓이 없습니다")
+        message = envelope("PROTOCOL_ERROR", code=code, message=message_text, relatedEventId=None, closeConnection=False)
 
         async def _send():
             await self._current_ws.send_str(json.dumps(message))

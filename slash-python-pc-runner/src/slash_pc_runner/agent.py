@@ -319,7 +319,6 @@ class ContractPcRunner:
         )
         heartbeat_thread.start()
         try:
-            self._reconnect_attempt = 0
             self._state = "AUTHENTICATING"
             self._send(socket, "HELLO", **self._build_hello())
 
@@ -418,6 +417,9 @@ class ContractPcRunner:
             )
             self._send(socket, "AUTH", challengeId=message["challengeId"], signature=signature)
             self._send(socket, "READY", **self._build_ready())
+            # 소켓 연결(101) 직후가 아니라 여기서 리셋해야 한다 — 서버가 인증 단계에서 매번
+            # 거부해도(예: 해제된 기기) 백오프가 항상 1초로 되돌아가지 않고 실제로 늘어난다.
+            self._reconnect_attempt = 0
             self._state = "READY"
             self._log("READY 전송 완료")
             self._fire_ready_waiters()
@@ -433,7 +435,15 @@ class ContractPcRunner:
             return
 
         if msg_type == "PROTOCOL_ERROR":
-            self._log(f"PROTOCOL_ERROR 수신: {message.get('code')} {message.get('message')}")
+            code = message.get("code")
+            self._log(f"PROTOCOL_ERROR 수신: {code} {message.get('message')}")
+            if code == "DEVICE_REVOKED":
+                # 저장된 식별 정보를 지워도 지금 돌고 있는 이 프로세스의 self._device_token은
+                # 메모리에 그대로 남는다 — stop()으로 재연결 루프 자체를 멈춰야 같은 죽은
+                # 토큰으로 계속 재시도하는 걸 막을 수 있다.
+                if self._options.identity_store:
+                    self._options.identity_store.clear()
+                self.stop()
             return
 
         if msg_type == "TASK":
