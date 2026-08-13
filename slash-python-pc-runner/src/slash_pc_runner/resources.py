@@ -16,7 +16,7 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-def config_dir(app_name: str = "slash-agent-py") -> Path:
+def config_dir(app_name: str = "slash-pc-runner-py") -> Path:
     """앱 설정·상태 저장 디렉터리 — OS별 관례 경로로 분기한다.
     Windows는 %APPDATA%(없으면 홈 폴더 밑 AppData\\Roaming으로 폴백), 그 외(macOS)는
     Application Support를 쓴다."""
@@ -27,7 +27,7 @@ def config_dir(app_name: str = "slash-agent-py") -> Path:
 
 
 def resource_path(*parts: str) -> Path:
-    """개발 모드: 이 패키지(src/slash_agent/) 기준. 얼린 모드: PyInstaller가 풀어둔 번들 루트 기준."""
+    """개발 모드: 이 패키지(src/slash_pc_runner/) 기준. 얼린 모드: PyInstaller가 풀어둔 번들 루트 기준."""
     if is_frozen():
         base = Path(getattr(sys, "_MEIPASS"))
     else:

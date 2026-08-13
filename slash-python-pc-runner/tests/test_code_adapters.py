@@ -8,8 +8,8 @@ import threading
 
 import pytest
 
-import slash_agent.code_adapters as code_adapters
-from slash_agent.code_adapters import (
+import slash_pc_runner.code_adapters as code_adapters
+from slash_pc_runner.code_adapters import (
     CodeAdapterError,
     CodeAdapterNotConfiguredError,
     ProjectWorkspaceConfig,

@@ -49,7 +49,7 @@ class AgentIdentityStore(Protocol):
 class KeyringIdentityStore:
     """서비스명·계정명 조합으로 OS 보안 저장소에 식별정보 JSON을 통째로 저장."""
 
-    def __init__(self, service_name: str = "slash-agent", account: str = "device-identity"):
+    def __init__(self, service_name: str = "slash-pc-runner", account: str = "device-identity"):
         self._service_name = service_name
         self._account = account
 

@@ -1,4 +1,4 @@
-"""로컬 에이전트 핵심 — agent.ts(ContractAgent) 대응.
+"""로컬 에이전트 핵심 — agent.ts(ContractPcRunner) 대응.
 
 TS는 단일 이벤트루프 기반이라 async/await로 동시성을 표현하지만, Python은 동기 WSS
 클라이언트(websockets.sync.client)를 쓰므로 연결 루프를 백그라운드 스레드로 돌린다.
@@ -101,11 +101,11 @@ def _truncate_code_analysis_result(result: dict) -> dict:
 
 
 @dataclass
-class ContractAgentOptions:
+class ContractPcRunnerOptions:
     api_base_url: str
     # 정상 페어링 경로. preset_device_id/preset_device_token을 주면 이 값은 무시되고 HTTP 페어링을 건너뛴다.
     pairing_code: Optional[str] = None
-    device_name: str = "slash-agent-py"
+    device_name: str = "slash-pc-runner-py"
     heartbeat_interval_s: float = 30.0
     log: Callable[[str], None] = field(default=lambda line: None)
     # 시험 전용: 이미 발급된 deviceId/deviceToken을 직접 주입해 HTTP 페어링 단계를 생략한다.
@@ -120,8 +120,8 @@ class ContractAgentOptions:
     project_workspaces: list[ProjectWorkspaceConfig] = field(default_factory=list)
 
 
-class ContractAgent:
-    def __init__(self, options: ContractAgentOptions):
+class ContractPcRunner:
+    def __init__(self, options: ContractPcRunnerOptions):
         self._options = options
         self._key_pair: AgentKeyPair = generate_agent_key_pair()
         self._socket = None
@@ -172,7 +172,7 @@ class ContractAgent:
         event = threading.Event()
         self._ready_waiters.append(event)
         if not event.wait(timeout_s):
-            raise TimeoutError("slash-agent READY 대기 타임아웃")
+            raise TimeoutError("slash-pc-runner READY 대기 타임아웃")
 
     def stop(self) -> None:
         self._stopped = True
@@ -184,7 +184,7 @@ class ContractAgent:
                 pass
 
     def _log(self, line: str) -> None:
-        self._options.log(f"[slash-agent] {line}")
+        self._options.log(f"[slash-pc-runner] {line}")
 
     # ---- 기기 식별 정보 영속화 ----
 
@@ -359,7 +359,7 @@ class ContractAgent:
     def _build_hello(self) -> dict:
         return dict(
             deviceId=self._device_id,
-            agentVersion="slash-agent-py/0.1.0",
+            agentVersion="slash-pc-runner-py/0.1.0",
             os="MACOS",
             architecture="ARM64" if platform.machine() in ("arm64", "aarch64") else "X86_64",
             osVersion=platform.platform(),

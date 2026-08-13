@@ -1,4 +1,4 @@
-"""개발용 CLI 진입점 — cli.ts 대응. `python -m slash_agent.cli`로 실행."""
+"""개발용 CLI 진입점 — cli.ts 대응. `python -m slash_pc_runner.cli`로 실행."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import threading
 import urllib.request
 from pathlib import Path
 
-from .agent import ContractAgent, ContractAgentOptions
+from .agent import ContractPcRunner, ContractPcRunnerOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
 from .processed_task_store import JsonFileProcessedTaskStore
 
-STATE_DIR = Path.home() / ".slash-agent-py"
+STATE_DIR = Path.home() / ".slash-pc-runner-py"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -26,13 +26,13 @@ def _log(line: str) -> None:
 
 
 def _obtain_pairing_code(api_base_url: str) -> str:
-    explicit = os.environ.get("SLASH_AGENT_PAIRING_CODE")
+    explicit = os.environ.get("SLASH_PC_RUNNER_PAIRING_CODE")
     if explicit:
         return explicit
 
     login_req = urllib.request.Request(
         f"{api_base_url}/test/login",
-        data=json.dumps({"email": "slash-agent-py-tester@example.com", "displayName": "slash-agent-py tester"}).encode(),
+        data=json.dumps({"email": "slash-pc-runner-py-tester@example.com", "displayName": "slash-pc-runner-py tester"}).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -47,13 +47,13 @@ def _obtain_pairing_code(api_base_url: str) -> str:
     )
     with urllib.request.urlopen(pairing_req) as res:
         pairing_code = json.loads(res.read().decode())["data"]["pairingCode"]
-    _log(f"[slash-agent] 자동 발급된 페어링 코드: {pairing_code}")
+    _log(f"[slash-pc-runner] 자동 발급된 페어링 코드: {pairing_code}")
     return pairing_code
 
 
 def main() -> None:
-    api_base_url = os.environ.get("SLASH_AGENT_API_BASE_URL", "http://localhost:4000")
-    identity_store = KeyringIdentityStore(service_name="slash-agent-py-dev")
+    api_base_url = os.environ.get("SLASH_PC_RUNNER_API_BASE_URL", "http://localhost:4000")
+    identity_store = KeyringIdentityStore(service_name="slash-pc-runner-py-dev")
     processed_task_store = JsonFileProcessedTaskStore(STATE_DIR / "processed-tasks.json")
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     file_index_store = FileIndexStore(str(STATE_DIR / "file-index.sqlite3"))
@@ -68,12 +68,12 @@ def main() -> None:
     has_persisted_identity = identity_store.load() is not None
     pairing_code = None if has_persisted_identity else _obtain_pairing_code(api_base_url)
 
-    agent = ContractAgent(
-        ContractAgentOptions(
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
             api_base_url=api_base_url,
             pairing_code=pairing_code,
-            device_name=os.environ.get("SLASH_AGENT_DEVICE_NAME", "slash-agent-py-simulator"),
-            heartbeat_interval_s=float(os.environ.get("SLASH_AGENT_HEARTBEAT_INTERVAL_S", "30")),
+            device_name=os.environ.get("SLASH_PC_RUNNER_DEVICE_NAME", "slash-pc-runner-py-simulator"),
+            heartbeat_interval_s=float(os.environ.get("SLASH_PC_RUNNER_HEARTBEAT_INTERVAL_S", "30")),
             log=_log,
             identity_store=identity_store,
             processed_task_store=processed_task_store,
@@ -84,7 +84,7 @@ def main() -> None:
 
     agent.start()
     agent.wait_until_ready(20.0)
-    _log(f"[slash-agent] READY (deviceId={agent.get_device_id()})")
+    _log(f"[slash-pc-runner] READY (deviceId={agent.get_device_id()})")
 
     # signal.pause()는 안 된다 — CODE_ANALYSIS처럼 백그라운드 스레드에서 subprocess를 띄우는
     # 작업이 끝나면 그 자식 프로세스 종료(SIGCHLD)만으로도 조기에 깨어나 버린다(실제로 겪은

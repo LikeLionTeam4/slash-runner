@@ -1,6 +1,6 @@
 """agent.reconnect-dedupe.test.ts 대응 — 재연결·중복 Task 단위 시험.
 
-실제 소켓·서명 검증을 쓰는 서버(fake_agent_server)로 agent.py를 직접 구동한다.
+실제 소켓·서명 검증을 쓰는 서버(fake_pc_runner_server)로 agent.py를 직접 구동한다.
 """
 
 import time
@@ -8,21 +8,21 @@ import uuid
 
 import pytest
 
-from slash_agent.agent import ContractAgent, ContractAgentOptions
+from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
 
-from fake_agent_server import start_fake_agent_server
+from fake_pc_runner_server import start_fake_pc_runner_server
 
 
 @pytest.fixture
 def server():
-    s = start_fake_agent_server()
+    s = start_fake_pc_runner_server()
     yield s
     s.close()
 
 
-def start_agent(server) -> ContractAgent:
-    agent = ContractAgent(
-        ContractAgentOptions(api_base_url=server.url, pairing_code="000000", heartbeat_interval_s=60)
+def start_agent(server) -> ContractPcRunner:
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(api_base_url=server.url, pairing_code="000000", heartbeat_interval_s=60)
     )
     agent.start()
     agent.wait_until_ready()

@@ -5,11 +5,11 @@
 
 import pytest
 
-from slash_agent.agent import ContractAgent, ContractAgentOptions
-from slash_agent.crypto import generate_agent_key_pair
-from slash_agent.identity_store import PersistedAgentIdentity
+from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
+from slash_pc_runner.crypto import generate_agent_key_pair
+from slash_pc_runner.identity_store import PersistedAgentIdentity
 
-from fake_agent_server import start_fake_agent_server
+from fake_pc_runner_server import start_fake_pc_runner_server
 
 
 class MemoryIdentityStore:
@@ -30,15 +30,15 @@ class MemoryIdentityStore:
 
 @pytest.fixture
 def server():
-    s = start_fake_agent_server()
+    s = start_fake_pc_runner_server()
     yield s
     s.close()
 
 
 def test_invalid_pairing_code_fails_start(server):
     server.accepted_pairing_code = "111111"
-    agent = ContractAgent(
-        ContractAgentOptions(
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
             api_base_url=server.url,
             pairing_code="000000",  # 서버가 받아주지 않는 코드
             heartbeat_interval_s=60,
@@ -62,8 +62,8 @@ def test_stale_identity_falls_back_to_repairing(server):
         )
     )
 
-    agent = ContractAgent(
-        ContractAgentOptions(
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
             api_base_url=server.url,
             pairing_code="222222",  # 갱신 실패 시 폴백용
             heartbeat_interval_s=60,
