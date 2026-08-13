@@ -24,7 +24,7 @@ from aiohttp import web
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from slash_agent.protocol import (
+from slash_pc_runner.protocol import (
     build_challenge_signing_payload,
     build_refresh_signing_payload,
     envelope,
@@ -47,7 +47,7 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-class FakeAgentServer:
+class FakePcRunnerServer:
     def __init__(self):
         self.devices: dict[str, dict] = {}
         self.pairing_sessions: dict[str, dict] = {}
@@ -319,7 +319,7 @@ class FakeAgentServer:
         asyncio.run_coroutine_threadsafe(_close(), self._loop).result(timeout=5)
 
 
-def start_fake_agent_server() -> FakeAgentServer:
-    server = FakeAgentServer()
+def start_fake_pc_runner_server() -> FakePcRunnerServer:
+    server = FakePcRunnerServer()
     server.start()
     return server

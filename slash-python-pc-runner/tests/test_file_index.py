@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from slash_agent.file_index import FileIndexStore, SearchFolderConfig
+from slash_pc_runner.file_index import FileIndexStore, SearchFolderConfig
 
 
 def make_tmp_folder(tmp_path_factory, files: dict[str, str]) -> Path:
-    root = tmp_path_factory.mktemp("slash-agent-index-test")
+    root = tmp_path_factory.mktemp("slash-pc-runner-index-test")
     for name, content in files.items():
         (root / name).write_text(content)
     return root
@@ -79,7 +79,7 @@ class TestMultiFolderIsolation:
 
 class TestFolderStatus:
     def test_missing_path_reports_unavailable_and_unsearchable(self, tmp_path_factory, store):
-        store.sync_folders([SearchFolderConfig("sf-missing", "없음", "/no/such/path/slash-agent-test")])
+        store.sync_folders([SearchFolderConfig("sf-missing", "없음", "/no/such/path/slash-pc-runner-test")])
 
         assert store.list_search_folders() == [
             {"searchFolderId": "sf-missing", "displayName": "없음", "indexStatus": "UNAVAILABLE"}

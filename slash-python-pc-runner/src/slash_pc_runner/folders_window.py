@@ -9,7 +9,7 @@
 slash-web과 같은 실제 HTML/CSS(디자인 토큰까지 그대로)를 쓸 수 있고, 시스템 내장
 WebView라 Chromium을 따로 안 묶어도 돼서 이 프로젝트의 "가볍게" 방향과도 맞는다.
 
-실행: python -m slash_agent.folders_window <search-folders.json 경로>
+실행: python -m slash_pc_runner.folders_window <search-folders.json 경로>
 확인을 누르면 그 경로에 갱신된 목록을 쓰고 종료(exit 0), 취소는 아무것도 안 쓰고 종료(exit 1).
 """
 
@@ -119,7 +119,7 @@ def run(config_path_str: str) -> int:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("사용법: python -m slash_agent.folders_window <search-folders.json 경로>", file=sys.stderr)
+        print("사용법: python -m slash_pc_runner.folders_window <search-folders.json 경로>", file=sys.stderr)
         sys.exit(2)
     sys.exit(run(sys.argv[1]))
 

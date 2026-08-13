@@ -1,7 +1,7 @@
 # PyInstaller 스펙 — 트레이 앱(tray_app.py)과 색인 폴더 관리 창(folders_window.py)을
 # 하나의 실행 파일로 묶는다(단일 진입점은 __main__.py, --folders-window 인자로 분기).
 #
-# 빌드: cd slash-python-agent && pyinstaller slash_agent.spec
+# 빌드: cd slash-python-pc-runner && pyinstaller slash_pc_runner.spec
 
 import sys
 from pathlib import Path
@@ -9,7 +9,7 @@ from pathlib import Path
 block_cipher = None
 project_root = Path(SPECPATH)
 repo_root = project_root.parent
-package_dir = project_root / "src" / "slash_agent"
+package_dir = project_root / "src" / "slash_pc_runner"
 
 datas = [
     (str(package_dir / "folders_window.html"), "."),
@@ -44,7 +44,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="SlashAgent",
+    name="Slash",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -60,17 +60,17 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="SlashAgent",
+    name="Slash",
 )
 
 app = BUNDLE(
     coll,
-    name="Slash Agent.app",
+    name="Slash.app",
     icon=str(package_dir / "assets" / "AppIcon.icns"),
-    bundle_identifier="com.slash-test.agent-py",
+    bundle_identifier="com.slash-test.pc-runner",
     info_plist={
-        "CFBundleName": "Slash Agent",
-        "CFBundleDisplayName": "Slash Agent",
+        "CFBundleName": "Slash",
+        "CFBundleDisplayName": "Slash",
         "CFBundleShortVersionString": "0.1.0",
         # 메뉴바 전용 앱 — Dock 아이콘/앱 전환기에 안 뜬다(Electron agent-app의
         # LSUIElement와 동일 설정). 이게 걸리면 tray_app.py/folders_window.py의

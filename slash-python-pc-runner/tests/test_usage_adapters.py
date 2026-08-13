@@ -7,8 +7,8 @@ Claude Code 쪽은 합성 픽스처 검증 외에, 이 머신의 실제 ~/.claud
 import json
 from pathlib import Path
 
-import slash_agent.usage_adapters as usage_adapters
-from slash_agent.usage_adapters import (
+import slash_pc_runner.usage_adapters as usage_adapters
+from slash_pc_runner.usage_adapters import (
     _claude_code_root,
     _codex_root,
     collect_claude_code_usage,

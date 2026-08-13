@@ -1,17 +1,20 @@
-# PyInstaller 스펙(Windows) — macOS용 slash_agent.spec과 같은 구조(단일 진입점 run.py,
+# PyInstaller 스펙(Windows) — macOS용 slash_pc_runner.spec과 같은 구조(단일 진입점 run.py,
 # 트레이+색인 폴더 창을 인자로 분기)를 Windows에 맞게 옮긴 것.
 #
 # 주의: 이 스펙은 macOS 개발 환경에서 "작성"만 했다 — PyInstaller는 크로스 컴파일을 지원하지
 # 않아 실제 빌드·실행 검증은 Windows 머신에서 직접 해야 한다(아직 못함, 알려진 한계).
 #
-# 빌드(Windows에서): cd slash-python-agent && pyinstaller slash_agent_windows.spec
+# 빌드(Windows에서): cd slash-python-pc-runner && pyinstaller slash_pc_runner_windows.spec
+#
+# 앱 표시 이름(SlashAgent)은 이번 macOS 우선 리네이밍 범위에서 제외했다 — Windows 실기기
+# 재검증 없이 표시 이름만 바꾸는 건 위험해서, macOS(Slash.app)와 맞추는 작업은 별도로 진행한다.
 
 from pathlib import Path
 
 block_cipher = None
 project_root = Path(SPECPATH)
 repo_root = project_root.parent
-package_dir = project_root / "src" / "slash_agent"
+package_dir = project_root / "src" / "slash_pc_runner"
 
 datas = [
     (str(package_dir / "folders_window.html"), "."),

@@ -8,22 +8,22 @@ from pathlib import Path
 
 import pytest
 
-import slash_agent.usage_adapters as usage_adapters
-from slash_agent.agent import ContractAgent, ContractAgentOptions
+import slash_pc_runner.usage_adapters as usage_adapters
+from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
 
-from fake_agent_server import start_fake_agent_server
+from fake_pc_runner_server import start_fake_pc_runner_server
 
 
 @pytest.fixture
 def server():
-    s = start_fake_agent_server()
+    s = start_fake_pc_runner_server()
     yield s
     s.close()
 
 
-def start_agent(server) -> ContractAgent:
-    agent = ContractAgent(
-        ContractAgentOptions(api_base_url=server.url, pairing_code="000000", heartbeat_interval_s=60)
+def start_agent(server) -> ContractPcRunner:
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(api_base_url=server.url, pairing_code="000000", heartbeat_interval_s=60)
     )
     agent.start()
     agent.wait_until_ready()

@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "slash-agent"
+name = "slash-pc-runner"
 version = "0.1.0"
-description = "Slash 로컬 에이전트 — Python 구현 (Electron agent-app 대체)"
+description = "Slash 로컬 실행기(PC 작업 실행기) — Python 구현 (Electron agent-app 대체)"
 requires-python = ">=3.11"
 dependencies = [
     "keyring>=25.0",
@@ -19,8 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
-slash-agent-tray = "slash_agent.tray_app:main"
-slash-agent-cli = "slash_agent.cli:main"
+slash-pc-runner-tray = "slash_pc_runner.tray_app:main"
+slash-pc-runner-cli = "slash_pc_runner.cli:main"
 
 [project.optional-dependencies]
 build = [
@@ -29,7 +29,7 @@ build = [
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    # 시험 전용 fake_agent_server.py가 HTTP(REST)+WS를 같은 포트에서 서빙하기 위해서만 씀 —
+    # 시험 전용 fake_pc_runner_server.py가 HTTP(REST)+WS를 같은 포트에서 서빙하기 위해서만 씀 —
     # 실제 배포되는 에이전트는 안 씀(runtime dependencies에는 없음)
     "aiohttp>=3.10",
 ]

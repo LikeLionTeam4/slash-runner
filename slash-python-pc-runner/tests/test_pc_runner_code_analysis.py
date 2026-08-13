@@ -8,23 +8,23 @@ import uuid
 
 import pytest
 
-import slash_agent.agent as agent_module
-from slash_agent.agent import ContractAgent, ContractAgentOptions
-from slash_agent.code_adapters import ProjectWorkspaceConfig
+import slash_pc_runner.agent as agent_module
+from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
+from slash_pc_runner.code_adapters import ProjectWorkspaceConfig
 
-from fake_agent_server import start_fake_agent_server
+from fake_pc_runner_server import start_fake_pc_runner_server
 
 
 @pytest.fixture
 def server():
-    s = start_fake_agent_server()
+    s = start_fake_pc_runner_server()
     yield s
     s.close()
 
 
-def start_agent(server, **options_kwargs) -> ContractAgent:
-    agent = ContractAgent(
-        ContractAgentOptions(api_base_url=server.url, pairing_code="000000", heartbeat_interval_s=60, **options_kwargs)
+def start_agent(server, **options_kwargs) -> ContractPcRunner:
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(api_base_url=server.url, pairing_code="000000", heartbeat_interval_s=60, **options_kwargs)
     )
     agent.start()
     agent.wait_until_ready()
@@ -207,7 +207,7 @@ def test_oversized_result_is_truncated_before_result_sent(server, tmp_path, monk
 
 
 def test_execution_failure_maps_to_policy_denied(server, tmp_path, monkeypatch):
-    from slash_agent.code_adapters import CodeAdapterError
+    from slash_pc_runner.code_adapters import CodeAdapterError
 
     workspace = make_workspace(tmp_path, adapters=["CLAUDE_CODE"])
     monkeypatch.setitem(agent_module.CODE_ADAPTER_AVAILABILITY_CHECKS, "CLAUDE_CODE", lambda: True)

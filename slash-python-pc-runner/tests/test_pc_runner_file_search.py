@@ -6,29 +6,29 @@ import uuid
 
 import pytest
 
-from slash_agent.agent import ContractAgent, ContractAgentOptions
-from slash_agent.file_index import FileIndexStore, SearchFolderConfig
+from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
+from slash_pc_runner.file_index import FileIndexStore, SearchFolderConfig
 
-from fake_agent_server import start_fake_agent_server
+from fake_pc_runner_server import start_fake_pc_runner_server
 
 
 @pytest.fixture
 def server():
-    s = start_fake_agent_server()
+    s = start_fake_pc_runner_server()
     yield s
     s.close()
 
 
-def start_agent_with_folder(server, tmp_path_factory) -> tuple[ContractAgent, FileIndexStore]:
-    root = tmp_path_factory.mktemp("slash-agent-file-search-test")
+def start_agent_with_folder(server, tmp_path_factory) -> tuple[ContractPcRunner, FileIndexStore]:
+    root = tmp_path_factory.mktemp("slash-pc-runner-file-search-test")
     (root / "프로젝트_계획.md").write_text("")
 
     file_index_store = FileIndexStore(":memory:")
     search_folders = [SearchFolderConfig("sf-a", "테스트 폴더", str(root))]
     file_index_store.sync_folders(search_folders)
 
-    agent = ContractAgent(
-        ContractAgentOptions(
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
             api_base_url=server.url,
             pairing_code="000000",
             heartbeat_interval_s=60,

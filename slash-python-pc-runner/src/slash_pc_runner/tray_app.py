@@ -25,7 +25,7 @@ import pystray
 from PIL import Image
 
 from . import single_instance
-from .agent import ContractAgent, ContractAgentOptions
+from .agent import ContractPcRunner, ContractPcRunnerOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
 from .processed_task_store import JsonFileProcessedTaskStore
@@ -76,11 +76,11 @@ def _load_config() -> dict:
         except json.JSONDecodeError:
             pass
     return {
-        "apiBaseUrl": file_config.get("apiBaseUrl") or os.environ.get("SLASH_AGENT_API_BASE_URL", "http://localhost:4000"),
-        "pairingCode": file_config.get("pairingCode") or os.environ.get("SLASH_AGENT_PAIRING_CODE"),
-        "deviceName": file_config.get("deviceName") or os.environ.get("SLASH_AGENT_DEVICE_NAME", "slash-agent-py"),
+        "apiBaseUrl": file_config.get("apiBaseUrl") or os.environ.get("SLASH_PC_RUNNER_API_BASE_URL", "http://localhost:4000"),
+        "pairingCode": file_config.get("pairingCode") or os.environ.get("SLASH_PC_RUNNER_PAIRING_CODE"),
+        "deviceName": file_config.get("deviceName") or os.environ.get("SLASH_PC_RUNNER_DEVICE_NAME", "slash-pc-runner-py"),
         "heartbeatIntervalS": float(
-            file_config.get("heartbeatIntervalS") or os.environ.get("SLASH_AGENT_HEARTBEAT_INTERVAL_S", 30)
+            file_config.get("heartbeatIntervalS") or os.environ.get("SLASH_PC_RUNNER_HEARTBEAT_INTERVAL_S", 30)
         ),
     }
 
@@ -95,7 +95,7 @@ def _obtain_pairing_code(api_base_url: str) -> str:
     """등록 코드가 없으면 시험 전용 자동 로그인+등록코드 발급으로 채운다(cli.py와 동일한 편의 로직)."""
     login_req = urllib.request.Request(
         f"{api_base_url}/test/login",
-        data=json.dumps({"email": "agent-py-app-tester@example.com", "displayName": "agent-py-app tester"}).encode(),
+        data=json.dumps({"email": "pc-runner-py-app-tester@example.com", "displayName": "pc-runner-py-app tester"}).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -116,7 +116,7 @@ class TrayApp:
         icon_path = resource_path("assets", "trayIcon.png")
         image = Image.open(icon_path) if icon_path.exists() else Image.new("RGBA", (16, 16), (0, 0, 0, 0))
 
-        self.agent: Optional[ContractAgent] = None
+        self.agent: Optional[ContractPcRunner] = None
         self.file_index_store: Optional[FileIndexStore] = None
         self.current_config: dict = {}
         self._search_folders_mtime: Optional[float] = None
@@ -136,7 +136,7 @@ class TrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("종료", self.quit_app),
         )
-        self.icon = pystray.Icon("slash-agent", icon=image, title="Slash Agent", menu=menu)
+        self.icon = pystray.Icon("slash-pc-runner", icon=image, title="Slash", menu=menu)
 
     def start_agent(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -151,7 +151,7 @@ class TrayApp:
             )
 
         self.current_config = _load_config()
-        identity_store = KeyringIdentityStore(service_name="slash-agent-py-app")
+        identity_store = KeyringIdentityStore(service_name="slash-pc-runner-py-app")
         processed_task_store = JsonFileProcessedTaskStore(PROCESSED_TASKS_PATH)
         self.file_index_store = FileIndexStore(str(FILE_INDEX_DB_PATH))
 
@@ -165,9 +165,9 @@ class TrayApp:
             None if has_persisted_identity else _obtain_pairing_code(api_base_url)
         )
 
-        def build_agent(code: Optional[str]) -> ContractAgent:
-            return ContractAgent(
-                ContractAgentOptions(
+        def build_agent(code: Optional[str]) -> ContractPcRunner:
+            return ContractPcRunner(
+                ContractPcRunnerOptions(
                     api_base_url=api_base_url,
                     pairing_code=code,
                     device_name=self.current_config["deviceName"],
@@ -261,7 +261,7 @@ def _folders_window_command() -> list[str]:
     # 분기하게 한다. 개발 모드는 지금처럼 -m으로 모듈을 직접 지정한다.
     if is_frozen():
         return [sys.executable, "--folders-window", str(SEARCH_FOLDERS_PATH)]
-    return [sys.executable, "-m", "slash_agent.folders_window", str(SEARCH_FOLDERS_PATH)]
+    return [sys.executable, "-m", "slash_pc_runner.folders_window", str(SEARCH_FOLDERS_PATH)]
 
 
 def _hide_dock_icon() -> None:
