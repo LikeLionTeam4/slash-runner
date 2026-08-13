@@ -46,12 +46,58 @@ SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS", "AI_AGE
 PROCESSED_TASK_RETENTION_S = 60 * 60
 
 # 실행 중 진행률 보고 주기 — CODE_ANALYSIS처럼 오래 걸리는 작업(최대 300초)이 시작 시점의
-# PROGRESS(50%) 하나만 보내고 끝까지 조용하면 화면에서 멈춘 것처럼 보인다.
+# PROGRESS(0%) 하나만 보내고 끝까지 조용하면 화면에서 멈춘 것처럼 보인다.
 PROGRESS_TICK_INTERVAL_S = 15.0
+
+# slash-api의 tasks.result 컬럼에 CHECK(octet_length(result::text) <= 65536) 제약이 걸려
+# 있다(V004/V006 마이그레이션 확인) — CODE_ANALYSIS의 summary는 CLI 출력을 그대로 담으므로
+# 길이 제한이 없으면 이 상한을 넘겨 서버 저장 단계에서 실패할 수 있다. 다른 필드·JSON
+# 구조 자체의 오버헤드, summary 안의 JSON 이스케이프 확장분을 감안해 여유를 두고 자른다.
+CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT = 65536
+CODE_ANALYSIS_TRUNCATION_MARKER = "\n\n...(결과가 너무 길어 일부가 잘렸습니다)"
 
 
 def _iso_to_epoch(iso_str: str) -> float:
     return datetime.fromisoformat(iso_str).timestamp()
+
+
+def _truncate_utf8(text: str, max_bytes: int) -> str:
+    """UTF-8 인코딩 기준 max_bytes 이하로 자른다. 멀티바이트 문자 중간에서 잘리지 않도록
+    유효한 UTF-8이 될 때까지 뒤에서부터 줄인다."""
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    truncated = encoded[:max_bytes]
+    while truncated:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+    return ""
+
+
+def _truncate_code_analysis_result(result: dict) -> dict:
+    summary = result.get("summary")
+    if not isinstance(summary, str):
+        return result
+
+    def encoded_size(candidate: dict) -> int:
+        return len(json.dumps(candidate, ensure_ascii=False).encode("utf-8"))
+
+    if encoded_size(result) <= CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT:
+        return result
+
+    # summary만 줄여가며 전체 JSON 크기가 상한 이하가 될 때까지 반복한다 — JSON 이스케이프로
+    # 실제 바이트 수가 예상보다 늘어날 수 있어(따옴표·개행 등) 한 번에 계산하지 않고 검증한다.
+    budget = len(summary.encode("utf-8"))
+    while True:
+        budget = int(budget * 0.9)
+        candidate_summary = _truncate_utf8(summary, budget) + CODE_ANALYSIS_TRUNCATION_MARKER
+        candidate = {**result, "summary": candidate_summary, "truncated": True}
+        if budget <= 0 or encoded_size(candidate) <= CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT:
+            return candidate
 
 
 @dataclass
@@ -581,7 +627,7 @@ class ContractAgent:
                 if code_adapter == "CODEX":
                     extra_kwargs["on_turn_complete"] = lambda turn: self._send_turn_progress(socket, message, turn)
                 result = CODE_ADAPTER_RUNNERS[code_adapter](Path(workspace.root_path), query, **extra_kwargs)
-                return {"ok": True, "result": result}
+                return {"ok": True, "result": _truncate_code_analysis_result(result)}
             return {
                 "ok": False,
                 "error": {"code": "TASK_TYPE_NOT_SUPPORTED", "message": "unsupported task type", "retryable": False},

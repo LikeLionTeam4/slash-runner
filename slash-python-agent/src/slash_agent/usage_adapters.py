@@ -21,10 +21,30 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .protocol import now_iso_kst
+
+# AI_AGENT_USAGE는 매 호출마다 로그 디렉터리 전체(수백~수천 개 jsonl 파일)를 처음부터 다시
+# 훑는다 — agent.py가 같은 작업 하나에 _validate_task·_execute_task 두 번 호출하는 데다,
+# 사용자가 연달아 재조회해도 매번 전체 재파싱은 낭비다. 짧은 TTL 동안은 캐시를 돌려준다.
+_CACHE_TTL_S = 30.0
+_cache: dict[str, tuple[float, Optional[dict]]] = {}
+_cache_lock = threading.Lock()
+
+
+def _cached(cache_key: str, compute: Callable[[], Optional[dict]]) -> Optional[dict]:
+    with _cache_lock:
+        cached = _cache.get(cache_key)
+        if cached is not None and (time.monotonic() - cached[0]) < _CACHE_TTL_S:
+            return cached[1]
+    value = compute()
+    with _cache_lock:
+        _cache[cache_key] = (time.monotonic(), value)
+    return value
 
 
 def _claude_code_root() -> Path:
@@ -40,12 +60,16 @@ def _codex_root() -> Path:
 
 
 def collect_claude_code_usage(root: Optional[Path] = None) -> Optional[dict]:
+    resolved_root = root or _claude_code_root()
+    return _cached(f"CLAUDE_CODE:{resolved_root}", lambda: _collect_claude_code_usage(resolved_root))
+
+
+def _collect_claude_code_usage(root: Path) -> Optional[dict]:
     """
     세션 파일(jsonl) 하나당 여러 assistant 턴이 있고, 각 턴의 message.usage는 그 턴 하나의
     값(Anthropic Messages API 관례 — 누적 아님)이라 파일 안의 모든 usage를 더하면 그 세션의
     합계가 나온다.
     """
-    root = root or _claude_code_root()
     if not root.exists():
         return None
 
@@ -101,11 +125,15 @@ def collect_claude_code_usage(root: Optional[Path] = None) -> Optional[dict]:
 
 
 def collect_codex_usage(root: Optional[Path] = None) -> Optional[dict]:
+    resolved_root = root or _codex_root()
+    return _cached(f"CODEX:{resolved_root}", lambda: _collect_codex_usage(resolved_root))
+
+
+def _collect_codex_usage(root: Path) -> Optional[dict]:
     """
     token_count 이벤트의 total_token_usage는 그 시점까지의 누적 스냅샷이다(턴 하나의 값이
     아님) — Claude Code와 달리 더하면 안 되고, 세션의 마지막 이벤트 하나만 그 세션 합계로 쓴다.
     """
-    root = root or _codex_root()
     if not root.exists():
         return None
 
