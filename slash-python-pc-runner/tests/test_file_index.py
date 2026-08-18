@@ -15,7 +15,10 @@ from slash_pc_runner.file_index import FileIndexStore, SearchFolderConfig
 def make_tmp_folder(tmp_path_factory, files: dict[str, str]) -> Path:
     root = tmp_path_factory.mktemp("slash-pc-runner-index-test")
     for name, content in files.items():
-        (root / name).write_text(content)
+        # encoding 생략 시 Path.write_text()는 로케일 기본 인코딩을 쓴다 — 한글 Windows(cp949)에서
+        # "수정됨".encode()(기본 UTF-8, 9바이트)와 실제 쓰여진 바이트 수(cp949, 6바이트)가 어긋나
+        # sizeBytes 비교 assert가 항상 실패했다. 명시적으로 맞춰준다.
+        (root / name).write_text(content, encoding="utf-8")
     return root
 
 
@@ -99,6 +102,60 @@ class TestFolderStatus:
 
         assert store.list_search_folders() == []
         assert store.is_searchable("sf-a") is False
+
+
+class TestFileRef:
+    def test_search_result_includes_stable_unique_file_ref(self, tmp_path_factory, store):
+        root = make_tmp_folder(tmp_path_factory, {"a.txt": "", "b.txt": ""})
+        store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
+
+        first = {i["name"]: i["fileRef"] for i in store.search("sf-a", "txt")["items"]}
+        assert first["a.txt"] != first["b.txt"]
+        assert all(isinstance(v, str) and v for v in first.values())
+
+        # 같은 파일을 다시 색인해도(재시작 시나리오 재현 — sync_folders 재호출) file_ref는 유지된다.
+        store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
+        second = {i["name"]: i["fileRef"] for i in store.search("sf-a", "txt")["items"]}
+        assert first == second
+
+    def test_modifying_file_keeps_same_file_ref(self, tmp_path_factory, store):
+        root = make_tmp_folder(tmp_path_factory, {"a.txt": "원본"})
+        store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
+        before = store.search("sf-a", "a.txt")["items"][0]["fileRef"]
+
+        (root / "a.txt").write_text("수정됨", encoding="utf-8")
+        wait_until(lambda: store.search("sf-a", "a.txt")["items"][0]["sizeBytes"] == len("수정됨".encode()))
+
+        after = store.search("sf-a", "a.txt")["items"][0]["fileRef"]
+        assert before == after
+
+    def test_resolve_file_ref_returns_absolute_path(self, tmp_path_factory, store):
+        root = make_tmp_folder(tmp_path_factory, {"a.txt": ""})
+        store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
+        file_ref = store.search("sf-a", "a.txt")["items"][0]["fileRef"]
+
+        resolved = store.resolve_file_ref(file_ref)
+        assert resolved == (root / "a.txt").resolve()
+
+    def test_resolve_file_ref_returns_none_for_unknown_ref(self, store):
+        assert store.resolve_file_ref("존재하지-않는-ref") is None
+
+    def test_resolve_file_ref_returns_none_after_file_deleted(self, tmp_path_factory, store):
+        root = make_tmp_folder(tmp_path_factory, {"지울파일.txt": ""})
+        store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
+        file_ref = store.search("sf-a", "지울파일")["items"][0]["fileRef"]
+
+        (root / "지울파일.txt").unlink()
+        wait_until(lambda: store.resolve_file_ref(file_ref) is None, timeout_s=10)
+
+    def test_resolve_file_ref_returns_none_when_folder_unregistered(self, tmp_path_factory, store):
+        root = make_tmp_folder(tmp_path_factory, {"a.txt": ""})
+        store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
+        file_ref = store.search("sf-a", "a.txt")["items"][0]["fileRef"]
+
+        store.sync_folders([])  # 검색 폴더 등록 해제 — 색인 DB의 행 자체는 남아있어도 거부해야 한다
+
+        assert store.resolve_file_ref(file_ref) is None
 
 
 class TestIncrementalWatch:

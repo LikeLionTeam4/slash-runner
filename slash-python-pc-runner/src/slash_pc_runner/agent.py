@@ -27,6 +27,7 @@ from .code_adapters import (
     ProjectWorkspaceConfig,
 )
 from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pair
+from .file_actions import reveal_in_file_manager
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import AgentIdentityStore, PersistedAgentIdentity
 from .pairing_client import pair_agent, refresh_session, verify_pairing
@@ -40,7 +41,7 @@ from .protocol import (
 from .system_status import collect_system_status
 from .usage_adapters import COLLECTORS
 
-SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "SYSTEM_STATUS", "AI_AGENT_USAGE", "CODE_ANALYSIS")
+SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "FILE_OPEN", "SYSTEM_STATUS", "AI_AGENT_USAGE", "CODE_ANALYSIS")
 
 # RESULT_ACK 수신 후 재수신 대비 보관 기간
 PROCESSED_TASK_RETENTION_S = 60 * 60
@@ -590,6 +591,13 @@ class ContractPcRunner:
             store = self._options.file_index_store
             if not isinstance(search_folder_id, str) or store is None or not store.is_searchable(search_folder_id):
                 return "SEARCH_FOLDER_NOT_FOUND"
+        if message["taskType"] == "FILE_OPEN":
+            file_ref = message["parameters"].get("fileRef")
+            store = self._options.file_index_store
+            if not isinstance(file_ref, str) or len(file_ref) == 0:
+                return "INVALID_PARAMETERS"
+            if store is None or store.resolve_file_ref(file_ref) is None:
+                return "FILE_NOT_FOUND"
         if message["taskType"] == "AI_AGENT_USAGE":
             provider = message["parameters"].get("provider")
             if provider not in COLLECTORS:
@@ -626,6 +634,18 @@ class ContractPcRunner:
                 query = str(message["parameters"].get("query", ""))
                 search_folder_id = str(message["parameters"].get("searchFolderId", ""))
                 return {"ok": True, "result": self._options.file_index_store.search(search_folder_id, query)}
+            if message["taskType"] == "FILE_OPEN":
+                file_ref = str(message["parameters"]["fileRef"])
+                path = self._options.file_index_store.resolve_file_ref(file_ref)
+                if path is None:
+                    # ACK 시점엔 있었지만 그 사이 파일이 삭제되는 등 경합(TOCTOU) 가능성이 있어
+                    # 실행 시점에도 다시 확인한다.
+                    return {
+                        "ok": False,
+                        "error": {"code": "FILE_NOT_FOUND", "message": "file reference not found", "retryable": False},
+                    }
+                reveal_in_file_manager(path)
+                return {"ok": True, "result": {"revealedAt": now_iso_kst()}}
             if message["taskType"] == "AI_AGENT_USAGE":
                 provider = message["parameters"]["provider"]
                 return {"ok": True, "result": COLLECTORS[provider]()}

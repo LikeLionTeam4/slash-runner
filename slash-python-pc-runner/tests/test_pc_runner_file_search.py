@@ -64,8 +64,12 @@ class TestFileSearch:
             assert len(items) == 1
             assert items[0]["name"] == "프로젝트_계획.md"
             assert items[0]["relativePath"] == "프로젝트_계획.md"
+            assert items[0]["extension"] == "md"
             assert items[0]["sizeBytes"] == 0
             assert "modifiedAt" in items[0]
+            assert isinstance(items[0]["fileRef"], str) and len(items[0]["fileRef"]) > 0
+            assert result["result"]["searchFolderId"] == "sf-a"
+            assert result["result"]["query"] == "프로젝트"
             assert result["result"]["returnedCount"] == 1
             assert result["result"]["truncated"] is False
         finally:
