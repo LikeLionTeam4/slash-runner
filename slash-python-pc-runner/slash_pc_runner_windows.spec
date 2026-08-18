@@ -1,8 +1,8 @@
 # PyInstaller 스펙(Windows) — macOS용 slash_pc_runner.spec과 같은 구조(단일 진입점 run.py,
 # 트레이+색인 폴더 창을 인자로 분기)를 Windows에 맞게 옮긴 것.
 #
-# 주의: 이 스펙은 macOS 개발 환경에서 "작성"만 했다 — PyInstaller는 크로스 컴파일을 지원하지
-# 않아 실제 빌드·실행 검증은 Windows 머신에서 직접 해야 한다(아직 못함, 알려진 한계).
+# Windows 11 실기기 및 GitHub Actions windows-latest 러너 양쪽에서 빌드·실행 검증을
+# 완료했다(README.md "빌드 및 실행 파일 생성 > Windows" 참고).
 #
 # 빌드(Windows에서): cd slash-python-pc-runner && pyinstaller slash_pc_runner_windows.spec
 

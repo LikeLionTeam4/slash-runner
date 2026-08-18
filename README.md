@@ -87,7 +87,7 @@ pyinstaller slash_pc_runner_windows.spec
   실기기에서 재검증을 완료했습니다.)
 - 트레이(`pystray`)와 색인 폴더 관리 창(`pywebview`, WebView2)은 macOS와 동일한 코드를 사용합니다.
 - **Windows 11(빌드 10.0.26200)에서 빌드 및 실행을 검증했습니다.** `pip install -e ".[build,test]"`,
-  `pytest`(59건 통과), 개발 모드 실행(Mac의 mock-api에 LAN으로 연결해 페어링·READY 확인),
+  `pytest`(75건 통과), 개발 모드 실행(Mac의 mock-api에 LAN으로 연결해 페어링·READY 확인),
   `pyinstaller slash_pc_runner_windows.spec` 빌드까지 모두 확인했습니다. 현재 `hiddenimports`
   목록만으로 빌드가 성공하며 추가 조정은 필요하지 않습니다. 트레이 아이콘 툴팁과 작업표시줄
   컨텍스트 메뉴 모두 "Slash"로 표시되며, 단일 인스턴스 락(`SlashTray` named mutex)도 이름 변경
@@ -223,28 +223,48 @@ KST `+09:00`). 작업 관련 메시지(TASK/ACK/PROGRESS/RESULT/RESULT_ACK)는 `
 | `PROTOCOL_ERROR` | `code, message, relatedEventId(nullable), closeConnection(bool)` |
 
 > 위 필드 이름(`agentVersion` 등)도 `slash-api`가 정의한 프로토콜 계약의 일부이므로 이 저장소가
-> 단독으로 변경할 수 없습니다. 실제로 서버에 전송하는 **값**만 `slash-pc-runner-py/0.1.0`처럼
-> 이번에 변경했습니다.
+> 단독으로 변경할 수 없습니다. 실제로 서버에 전송하는 **값**은 `slash-pc-runner-py/0.3.0`처럼
+> 패키지 버전을 그대로 담습니다.
 
 `reasonCode`/`error.code` 값: `DEVICE_BUSY, TASK_TYPE_NOT_SUPPORTED, INVALID_PARAMETERS,
-SEARCH_FOLDER_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EXPIRED, POLICY_DENIED`
+SEARCH_FOLDER_NOT_FOUND, FILE_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED,
+TASK_EXPIRED, POLICY_DENIED`
 
 `payloadSha256`은 존재 여부와 64자리 hex 형식만 검사 대상입니다. 정규화(직렬화) 알고리즘이
 아직 백엔드와 합의되지 않아, 인증 서명이나 무결성 증명으로는 사용하지 않습니다.
 
 ### 3) 현재 처리하는 작업
 
-PC 작업 실행기는 P0로 지정된 두 가지 작업만 처리하며, 그 외의 `taskType`은
-`TASK_TYPE_NOT_SUPPORTED`로 거부합니다.
+PC 작업 실행기는 다섯 가지 `taskType`을 처리하며, 그 외는 `TASK_TYPE_NOT_SUPPORTED`로
+거부합니다.
 
 - **`SYSTEM_STATUS`**: 실행 중인 PC의 CPU/메모리(`psutil`)·디스크 사용량을 조회하여
   `{cpuPercent, memoryPercent, memoryTotalMb, memoryUsedMb, diskPercent, diskTotalMb,
   diskUsedMb, collectedAt}`를 반환합니다. parameters는 없습니다.
-- **`FILE_SEARCH`**: `parameters.query`로 지정 폴더(`READY`의 `searchFolders`에 등록된 폴더,
-  기본값은 `fixtures/search-folder`) 내 파일을 SQLite FTS5(trigram)로 검색하여
-  `{items:[{name, relativePath, sizeBytes, modifiedAt}], returnedCount, truncated}`를
-  반환합니다. **상대 경로만** 반환하며 로컬 절대 경로는 노출하지 않습니다. 폴더는 watchdog로
-  실시간 증분 감시되어 재시작 없이 추가/삭제가 반영됩니다.
+- **`FILE_SEARCH`**: `parameters.{query, searchFolderId}`로 지정 폴더(`READY`의
+  `searchFolders`에 등록된 폴더, 기본값은 `fixtures/search-folder`) 내 파일을 SQLite
+  FTS5(trigram)로 검색하여 `{searchFolderId, query, items:[{fileRef, name, relativePath,
+  extension, sizeBytes, modifiedAt}], returnedCount, truncated}`를 반환합니다. **상대
+  경로만** 반환하며 로컬 절대 경로는 노출하지 않습니다. `fileRef`는 로컬에만 존재하는
+  불투명 식별자로, 이후 `FILE_OPEN`이 이 값으로 같은 파일을 다시 찾습니다. 폴더는
+  watchdog로 실시간 증분 감시되어 재시작 없이 추가/삭제가 반영됩니다.
+- **`FILE_OPEN`**: `parameters.fileRef`로 지정한 파일을 파일 탐색기(macOS는 Finder,
+  Windows는 탐색기)에서 **선택된 상태로 위치만 표시**하고 `{revealedAt}`을 반환합니다.
+  기본 연결 프로그램으로 파일을 실행하지 않습니다(임의 파일 실행 방지). 등록 해제된
+  폴더나 삭제된 파일을 가리키는 `fileRef`는 실행 시점에 재검증해 `FILE_NOT_FOUND`로
+  거부합니다.
+- **`AI_AGENT_USAGE`**: `parameters.provider`(`CLAUDE_CODE` 또는 `CODEX`)의 로컬 세션 로그
+  (`~/.claude/projects/`, `~/.codex/sessions/`)를 **읽기만** 해서 토큰 사용량을 집계하여
+  `{provider, totalSessions, totalInputTokens, totalOutputTokens, totalCachedTokens,
+  totalReasoningTokens, totalTokens, oldestSessionAt, newestSessionAt, collectedAt}`를
+  반환합니다. 해당 CLI를 쓴 적이 없어 로그 디렉터리 자체가 없으면
+  `CODE_AGENT_NOT_CONFIGURED`로 거부합니다.
+- **`CODE_ANALYSIS`**: `parameters.{workspaceId, query, codeAdapter?}`로 지정한 프로젝트
+  폴더에서 로컬에 설치된 `claude`/`codex` CLI를 실제로 **실행**해 분석 결과를 받습니다.
+  쓰기·셸 실행 도구는 CLI 플래그로 구조적으로 차단해 읽기 전용입니다.
+  `{codeAdapter, summary, turns, durationMs, collectedAt}`를 반환하며, 결과가 서버 저장
+  상한(64KB)을 넘으면 잘라서 보냅니다. 등록되지 않은 워크스페이스는 `WORKSPACE_NOT_FOUND`,
+  CLI가 설치되어 있지 않으면 `CODE_AGENT_NOT_CONFIGURED`로 거부합니다.
 
 ### 4) 안정성 관련 동작
 
