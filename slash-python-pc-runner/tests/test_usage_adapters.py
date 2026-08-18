@@ -7,6 +7,8 @@ Claude Code 쪽은 합성 픽스처 검증 외에, 이 머신의 실제 ~/.claud
 import json
 from pathlib import Path
 
+import pytest
+
 import slash_pc_runner.usage_adapters as usage_adapters
 from slash_pc_runner.usage_adapters import (
     _claude_code_root,
@@ -87,8 +89,14 @@ class TestClaudeCodeAdapter:
         assert result["totalInputTokens"] == 10
 
     def test_real_local_data_does_not_error(self):
-        """진짜 ~/.claude/projects/를 대상으로 — 이 머신에 실제로 존재하는 데이터."""
-        result = collect_claude_code_usage(_claude_code_root())
+        """진짜 ~/.claude/projects/를 대상으로 — 있으면 에러 없이 합계가 나오는지만 확인한다.
+        CI 러너처럼 Claude Code를 쓴 적 없는 환경엔 이 디렉터리 자체가 없는 게 정상이고
+        (collect_claude_code_usage 계약대로 None 반환, test_missing_root_returns_none이
+        이미 검증), 그 경우엔 이 시험 자체가 의미가 없어 건너뛴다."""
+        root = _claude_code_root()
+        if not root.exists():
+            pytest.skip("이 머신에 ~/.claude/projects/가 없음 — 로컬 전용 스모크 시험")
+        result = collect_claude_code_usage(root)
         assert result is not None
         assert result["totalSessions"] >= 0
         assert result["totalTokens"] >= 0
