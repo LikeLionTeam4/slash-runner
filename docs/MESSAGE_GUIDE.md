@@ -6,7 +6,7 @@
 다 있으니 여기서는 반복하지 않는다 — 여기는 **실제로 주고받는 JSON 그대로**를 보여주는 데 집중한다.
 
 기준 문서: `260804-1123_SLASH-메시지프로토콜.md`(이하 "프로토콜 문서"). 이 저장소의 `slash-api/mock-api`,
-`slash-agent/slash-python-pc-runner`는 이 프로토콜 문서 기준으로 구현·검증되어 있다.
+`slash-runner/slash-python-pc-runner`는 이 프로토콜 문서 기준으로 구현·검증되어 있다.
 
 ## 0. 큰 그림
 
@@ -28,7 +28,7 @@
 npx tsx slash-api/mock-api/src/server.ts
 
 # 터미널 2 — PC 작업 실행기 (slash_pc_runner, Python)
-cd slash-agent/slash-python-pc-runner && python -m slash_pc_runner.cli
+cd slash-runner/slash-python-pc-runner && python -m slash_pc_runner.cli
 # 콘솔에 "[slash-pc-runner] 자동 발급된 페어링 코드: NNNNNN" → "READY (deviceId=...)" 가 뜨면 준비된 것
 ```
 
