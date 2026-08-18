@@ -1,7 +1,7 @@
 """reveal_in_file_manager 단위 시험 — 플랫폼별로 올바른 명령을 구성하는지만 확인한다.
 실제 Finder/탐색기는 절대 띄우지 않는다(subprocess.run을 항상 대체)."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -13,7 +13,10 @@ def test_macos_uses_open_dash_r(monkeypatch):
     monkeypatch.setattr(file_actions.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(file_actions.subprocess, "run", lambda *a, **kw: calls.append((a, kw)))
 
-    file_actions.reveal_in_file_manager(Path("/tmp/문서.txt"))
+    # PurePosixPath를 써야 한다 — 실제 Path("/tmp/...")는 호스트가 Windows일 때
+    # 백슬래시로 정규화돼서(WindowsPath) 아래 assert의 POSIX 문자열과 어긋난다
+    # (호스트 OS와 무관하게 macOS 분기 자체만 검증하는 게 이 시험의 목적).
+    file_actions.reveal_in_file_manager(PurePosixPath("/tmp/문서.txt"))
 
     (args, kwargs) = calls[0]
     assert args[0] == ["open", "-R", "/tmp/문서.txt"]

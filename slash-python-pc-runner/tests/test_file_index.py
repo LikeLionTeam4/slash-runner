@@ -15,7 +15,10 @@ from slash_pc_runner.file_index import FileIndexStore, SearchFolderConfig
 def make_tmp_folder(tmp_path_factory, files: dict[str, str]) -> Path:
     root = tmp_path_factory.mktemp("slash-pc-runner-index-test")
     for name, content in files.items():
-        (root / name).write_text(content)
+        # encoding 생략 시 Path.write_text()는 로케일 기본 인코딩을 쓴다 — 한글 Windows(cp949)에서
+        # "수정됨".encode()(기본 UTF-8, 9바이트)와 실제 쓰여진 바이트 수(cp949, 6바이트)가 어긋나
+        # sizeBytes 비교 assert가 항상 실패했다. 명시적으로 맞춰준다.
+        (root / name).write_text(content, encoding="utf-8")
     return root
 
 
@@ -120,7 +123,7 @@ class TestFileRef:
         store.sync_folders([SearchFolderConfig("sf-a", "A", str(root))])
         before = store.search("sf-a", "a.txt")["items"][0]["fileRef"]
 
-        (root / "a.txt").write_text("수정됨")
+        (root / "a.txt").write_text("수정됨", encoding="utf-8")
         wait_until(lambda: store.search("sf-a", "a.txt")["items"][0]["sizeBytes"] == len("수정됨".encode()))
 
         after = store.search("sf-a", "a.txt")["items"][0]["fileRef"]
