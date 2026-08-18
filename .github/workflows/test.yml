@@ -1,0 +1,90 @@
+name: test
+
+# 다른 서비스(api·nlu·llm)의 test→container-build→publish-image→bump-dev-tag와 같은
+# 구조를 데스크톱 배포에 맞게 옮긴 것 — 이 저장소는 컨테이너/ECR이 아니라 PyInstaller
+# 실행 파일을 배포하므로, "이미지 publish"에 해당하는 단계가 "macOS·Windows 패키징"이고
+# "dev 배포"에 해당하는 단계가 "버전 태그로 GitHub Release 발행"이다. 다른 서비스들이
+# dev push 시 사람 확인 없이 자동으로 실제 배포까지 이어지는 것과 같은 방침으로, v* 태그
+# push도 사람 재확인 없이 Release 발행까지 자동으로 이어진다.
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+    tags: ["v*"]
+
+defaults:
+  run:
+    working-directory: slash-python-pc-runner
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[build,test]"
+      - run: pytest
+
+  package-macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[build]"
+      - run: pyinstaller slash_pc_runner.spec
+      # zip -r 대신 ditto를 쓴다 — .app 번들의 리소스 포크·확장 속성을 보존하며 압축하는
+      # macOS 표준 방식이다(Apple 공식 배포 가이드에서 권장하는 방법).
+      - run: ditto -c -k --sequesterRsrc --keepParent dist/Slash.app Slash-macOS-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Slash-macOS-arm64
+          path: slash-python-pc-runner/Slash-macOS-arm64.zip
+          retention-days: 14
+
+  package-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[build]"
+      - run: pyinstaller slash_pc_runner_windows.spec
+      - run: Compress-Archive -Path dist/Slash -DestinationPath Slash-Windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Slash-Windows-x64
+          path: slash-python-pc-runner/Slash-Windows-x64.zip
+          retention-days: 14
+
+  # v* 태그 push에서만 실행 — 다른 서비스의 bump-dev-tag와 같은 방침으로, 태그를 만든 것
+  # 자체가 이미 팀의 배포 결정이라 여기서 다시 사람 확인을 받지 않는다.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package-macos, package-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          # v0.3.0-pre처럼 태그 이름에 pre가 들어가면 프리릴리스로 표시한다.
+          prerelease: ${{ contains(github.ref_name, 'pre') }}
+          files: |
+            Slash-macOS-arm64/Slash-macOS-arm64.zip
+            Slash-Windows-x64/Slash-Windows-x64.zip
