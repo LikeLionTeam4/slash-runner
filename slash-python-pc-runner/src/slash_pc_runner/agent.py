@@ -30,7 +30,7 @@ from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pai
 from .file_actions import reveal_in_file_manager
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import AgentIdentityStore, PersistedAgentIdentity
-from .pairing_client import pair_agent, refresh_session, verify_pairing
+from .pairing_client import DeviceRevokedError, pair_agent, refresh_session, verify_pairing
 from .processed_task_store import ProcessedTaskStore
 from .protocol import (
     build_challenge_signing_payload,
@@ -259,6 +259,15 @@ class ContractPcRunner:
             self._log(f"기기 인증 토큰을 갱신했습니다 deviceId={self._device_id}")
             self._persist_identity()
             return True
+        except DeviceRevokedError as e:
+            # 권한 문제와 달리 재페어링으로 회복되지 않는다 — 그대로 두면 호출부가
+            # pairing_code 유무에 따라 새로 페어링을 시도하거나 죽는데, 둘 다 틀렸다.
+            # 여기서 식별 정보를 정리하고 그대로 전파해 호출부가 재페어링을 아예
+            # 시도하지 않게 한다(WSS 경로의 PROTOCOL_ERROR DEVICE_REVOKED 처리와 동일 원칙).
+            self._log(f"기기 등록이 해제되었습니다: {e}")
+            if self._options.identity_store:
+                self._options.identity_store.clear()
+            raise
         except Exception as e:
             self._log(f"토큰 갱신 실패, 재페어링으로 전환합니다: {e}")
             return False

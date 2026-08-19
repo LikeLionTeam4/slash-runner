@@ -9,6 +9,14 @@ import urllib.request
 from typing import Optional
 
 
+class DeviceRevokedError(RuntimeError):
+    """서버가 이 기기가 등록 해제됐다고 응답했다(reason code DEVICE_REVOKED).
+
+    권한 부족이나 일시적 네트워크 오류와 달리 재시도로 해결되지 않는다 — 호출부는 재페어링을
+    시도하지 말고 저장된 식별 정보를 정리한 뒤 사용자에게 재등록이 필요하다고 알려야 한다.
+    """
+
+
 def _post_json(url: str, body: dict, headers: Optional[dict] = None) -> dict:
     """페어링 REST 응답은 {data,meta} 봉투를 쓴다 (메시지 프로토콜 문서 §3.3)."""
     data = json.dumps(body).encode("utf-8")
@@ -20,11 +28,15 @@ def _post_json(url: str, body: dict, headers: Optional[dict] = None) -> dict:
             return parsed["data"]
     except urllib.error.HTTPError as e:
         body_text = e.read().decode("utf-8")
+        code = None
         try:
             parsed = json.loads(body_text)
-            message = f"{parsed['error']['code']}: {parsed['error']['message']}"
+            code = parsed["error"]["code"]
+            message = f"{code}: {parsed['error']['message']}"
         except (json.JSONDecodeError, KeyError):
             message = f"HTTP {e.code}"
+        if code == "DEVICE_REVOKED":
+            raise DeviceRevokedError(f"POST {url} failed: {message}") from e
         raise RuntimeError(f"POST {url} failed: {message}") from e
 
 

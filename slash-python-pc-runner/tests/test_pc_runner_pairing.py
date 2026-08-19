@@ -8,6 +8,7 @@ import pytest
 from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
 from slash_pc_runner.crypto import generate_agent_key_pair
 from slash_pc_runner.identity_store import PersistedAgentIdentity
+from slash_pc_runner.pairing_client import DeviceRevokedError
 
 from fake_pc_runner_server import start_fake_pc_runner_server
 
@@ -78,3 +79,46 @@ def test_stale_identity_falls_back_to_repairing(server):
         assert identity_store.saved[-1].device_id == agent.get_device_id()
     finally:
         agent.stop()
+
+
+def test_revoked_device_does_not_fall_back_to_repairing(server):
+    """slash-api#37(2026-08-18) 기준 — REST 토큰 갱신도 DEVICE_REVOKED를 구분해 응답한다.
+    재페어링 시도는 해제를 무시하고 새 기기로 재등록해버리는 꼴이라, 시도 자체를 하면 안 된다.
+    """
+    server.accepted_pairing_code = "444444"
+    pairing_agent = ContractPcRunner(
+        ContractPcRunnerOptions(api_base_url=server.url, pairing_code="444444", heartbeat_interval_s=60)
+    )
+    pairing_agent.start()
+    pairing_agent.wait_until_ready()
+    device_id = pairing_agent.get_device_id()
+    pairing_agent.stop()
+
+    server.devices[device_id]["revoked"] = True
+
+    # 서명이 유효한지는 상관없다 — 가짜 서버도 실제 서버(PairingService.refresh)도 해제 여부를
+    # 서명 검증보다 먼저 확인한다.
+    stale_key_pair = generate_agent_key_pair()
+    identity_store = MemoryIdentityStore(
+        PersistedAgentIdentity(
+            device_id=device_id,
+            device_token="any-token",
+            private_key_pem=stale_key_pair.export_private_key_pem(),
+            public_key_base64=stale_key_pair.public_key_base64,
+        )
+    )
+
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
+            api_base_url=server.url,
+            pairing_code=None,  # 실제 재시작 시나리오 — 새 페어링 코드가 없다
+            heartbeat_interval_s=60,
+            identity_store=identity_store,
+        )
+    )
+    with pytest.raises(DeviceRevokedError):
+        agent.start()
+
+    # 재페어링을 시도했다면 identity_store.saved에 새 기기 정보가 쌓였을 것이다.
+    assert identity_store.saved == []
+    assert identity_store.current is None
