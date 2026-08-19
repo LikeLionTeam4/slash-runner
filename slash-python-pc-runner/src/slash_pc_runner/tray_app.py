@@ -28,6 +28,7 @@ from . import single_instance
 from .agent import ContractPcRunner, ContractPcRunnerOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
+from .pairing_client import DeviceRevokedError
 from .processed_task_store import JsonFileProcessedTaskStore
 from .resources import config_dir, is_frozen, repo_fixtures_search_folder, resource_path
 
@@ -183,6 +184,12 @@ class TrayApp:
         self.agent = build_agent(pairing_code)
         try:
             self.agent.start()
+        except DeviceRevokedError:
+            # 해제된 기기는 자동 재등록을 시도하지 않는다 — 아래 fallback처럼 새 등록 코드를
+            # 받아 다시 페어링하면 해제를 무시하고 새 기기로 재등록해버리는 꼴이 된다. 사용자가
+            # 직접 재등록해야 한다는 신호이므로 그대로 전파한다(메시지에 서버 안내 문구가 담겨
+            # 있어 setup()의 상태 표시에 그대로 노출된다).
+            raise
         except Exception:
             # 저장된 식별 정보로 토큰 갱신까지 실패했는데 pairingCode도 없었던 경우(드묾) —
             # 새 등록 코드를 받아 한 번만 새로 페어링을 시도한다.

@@ -168,7 +168,9 @@ class FakePcRunnerServer:
         if not device:
             return self._fail(401, "AUTH_REQUIRED", "미등록 기기")
         if device["revoked"]:
-            return self._fail(409, "FORBIDDEN", "등록 해제된 기기")
+            # slash-api#37(2026-08-18) 기준 실제 서버 응답 — 예전엔 FORBIDDEN으로 뭉뚱그려서
+            # Agent가 이유를 구분할 수 없었다.
+            return self._fail(403, "DEVICE_REVOKED", "PC 등록이 해제되었습니다. 다시 등록해 주세요.")
         valid = verify_signature(
             build_refresh_signing_payload(body["deviceId"], body["refreshNonce"], body["requestedAt"]),
             body.get("signature", ""),
