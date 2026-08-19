@@ -31,8 +31,15 @@ pairing_client.py       HTTP 페어링/토큰 갱신 클라이언트
 identity_store.py       기기 식별 정보 영속화(keyring → macOS Keychain 등 OS 보안 저장소)
 processed_task_store.py 중복 방지·재전송 이력 영속화
 file_index.py           SQLite(FTS5 trigram)+watchdog 다중 폴더 파일 색인
+file_actions.py         FILE_OPEN 작업 실행(파일이 위치한 폴더를 파일 탐색기로 표시)
 system_status.py        SYSTEM_STATUS 작업 실행(psutil)
+usage_adapters.py       AI_AGENT_USAGE 작업 실행(로컬 Claude Code·Codex 사용량 조회)
+code_adapters.py        CODE_ANALYSIS 작업 실행(로컬 Claude Code·Codex CLI 호출, 읽기 전용)
 agent.py                핵심 로직 — 연결 루프·재연결·인증·작업 처리(ContractPcRunner)
+_build_info.py          빌드 커밋 SHA·날짜(agentVersion·트레이 메뉴에 노출)
+update_check.py         GitHub Releases 기준 최신 버전 확인(앱 시작 시 1회)
+single_instance.py      중복 실행 방지(named mutex/lock)
+resources.py            리소스 경로 해석(개발 모드 vs PyInstaller 번들)
 tray_app.py              메뉴바/시스템 트레이 앱(pystray, macOS·Windows 공통)
 folders_window.py       색인 폴더 관리 창(pywebview, slash-web과 동일한 디자인 토큰 사용)
 cli.py                   GUI 없는 개발용 CLI 진입점
@@ -129,8 +136,13 @@ pyinstaller slash_pc_runner_windows.spec
 백엔드에는 해당 엔드포인트가 없습니다).
 
 메뉴바/트레이 아이콘 클릭 시 표시되는 항목은 상태(연결중/READY/오프라인), 기기 ID, 접속 중인
-`slash-api` 주소, **색인 폴더 관리**, 설정 폴더 열기, 종료입니다. macOS에서는 Dock 아이콘이
-표시되지 않습니다(메뉴바 전용 앱이며, Windows에는 해당 개념이 없어 무관합니다).
+`slash-api` 주소, 버전·커밋·빌드일자(각각 별도 줄), **색인 폴더 관리**, 설정 폴더 열기,
+종료입니다. macOS에서는 Dock 아이콘이 표시되지 않습니다(메뉴바 전용 앱이며, Windows에는
+해당 개념이 없어 무관합니다).
+
+앱 시작 시 GitHub Releases를 1회 조회해 더 최신 버전이 있으면 OS 알림을 띄우고, 메뉴에도
+"새 버전 있음: vX.Y.Z" 줄이 추가로 나타납니다(클릭하면 릴리스 페이지가 열립니다). 조회에
+실패해도(오프라인 등) 조용히 넘어가며 앱 동작에는 영향이 없습니다.
 
 색인 폴더 관리 창은 별도 프로세스로 실행됩니다(트레이 아이콘과 GUI 창이 같은 프로세스의 메인
 스레드 이벤트 루프를 동시에 사용할 수 없기 때문입니다). `search-folders.json` 파일을 통해 실행
