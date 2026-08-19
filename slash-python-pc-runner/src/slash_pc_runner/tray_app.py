@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,7 @@ from .identity_store import KeyringIdentityStore
 from .pairing_client import DeviceRevokedError
 from .processed_task_store import JsonFileProcessedTaskStore
 from .resources import config_dir, is_frozen, repo_fixtures_search_folder, resource_path
+from .update_check import check_for_update
 
 CONFIG_DIR = config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -132,6 +134,11 @@ class TrayApp:
         self._version_text = f"버전: {PACKAGE_VERSION}"
         self._commit_text = f"커밋: {get_build_sha()}"
         self._build_date_text = f"빌드: {get_build_date()}"
+        # 앱 시작 시 한 번만 GitHub Releases를 조회한다(update_check.py 참고) — 확인
+        # 전이거나 최신이면 None이라 이 줄 자체가 안 보인다. 메뉴를 열어야 보이는
+        # 것만으로는 알림이라 부르기 부족해, 발견 시점에 icon.notify()로도 띄운다.
+        self._update_text: Optional[str] = None
+        self._update_url: Optional[str] = None
         self._stop_event = threading.Event()
 
         menu = pystray.Menu(
@@ -141,6 +148,11 @@ class TrayApp:
             pystray.MenuItem(lambda item: self._version_text, None, enabled=False),
             pystray.MenuItem(lambda item: self._commit_text, None, enabled=False),
             pystray.MenuItem(lambda item: self._build_date_text, None, enabled=False),
+            pystray.MenuItem(
+                lambda item: self._update_text or "",
+                self.open_release_page,
+                visible=lambda item: self._update_text is not None,
+            ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("색인 폴더 관리", self.open_folders_window),
             pystray.MenuItem("설정 폴더 열기", self.open_config_folder),
@@ -212,6 +224,23 @@ class TrayApp:
         while not self._stop_event.wait(REFRESH_INTERVAL_S):
             self.refresh()
 
+    def _check_for_update_once(self) -> None:
+        # 네트워크 호출이라 별도 스레드에서 한다 — setup()의 트레이 초기화(아이콘 표시,
+        # Dock 숨김)를 이것 때문에 늦추면 안 된다.
+        result = check_for_update()
+        if result is not None and result.update_available:
+            self._update_text = f"새 버전 있음: {result.latest_version}"
+            self._update_url = result.release_url
+            self.icon.update_menu()
+            # 메뉴에 줄만 추가하면 사용자가 직접 열어 보지 않는 한 알아챌 방법이 없다 —
+            # HAS_NOTIFICATION이 거짓인 플랫폼에서는 notify()가 조용히 아무 일도 안 한다.
+            if self.icon.HAS_NOTIFICATION:
+                self.icon.notify(f"{result.latest_version} 버전이 나왔습니다. 메뉴에서 눌러 다운로드하세요.", "Slash 업데이트")
+
+    def open_release_page(self, icon, item) -> None:
+        if self._update_url:
+            webbrowser.open(self._update_url)
+
     def refresh(self) -> None:
         # 색인 폴더 관리 창은 같은 실행 파일을 인자만 바꿔 재사용한다(패키징 여부와 무관 —
         # __main__.py 주석 참고) — 그쪽 창이 떠 있는 동안 이 프로세스의 Dock 아이콘이 macOS
@@ -270,6 +299,7 @@ class TrayApp:
         _hide_dock_icon()
         icon.visible = True
         threading.Thread(target=self._refresh_loop, daemon=True).start()
+        threading.Thread(target=self._check_for_update_once, daemon=True).start()
 
 
 def _folders_window_command() -> list[str]:
