@@ -17,6 +17,13 @@ def main() -> None:
 
         sys.exit(run(sys.argv[2]))
 
+    if len(sys.argv) >= 2 and sys.argv[1] == "--pairing-window":
+        from .pairing_window import main as pairing_main
+
+        sys.argv = sys.argv[1:]  # pairing_window.main()이 sys.argv[1]을 오류 메시지로 읽는다
+        pairing_main()
+        return
+
     from .tray_app import main as tray_main
 
     tray_main()
