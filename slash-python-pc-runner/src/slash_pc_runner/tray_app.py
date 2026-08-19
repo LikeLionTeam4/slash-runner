@@ -115,6 +115,38 @@ def _obtain_pairing_code(api_base_url: str) -> str:
         return json.loads(res.read().decode())["data"]["pairingCode"]
 
 
+def _pairing_window_command(error_message: Optional[str]) -> list[str]:
+    args = [error_message] if error_message else []
+    if is_frozen():
+        return [sys.executable, "--pairing-window", *args]
+    return [sys.executable, "-m", "slash_pc_runner.pairing_window", *args]
+
+
+def _prompt_for_pairing_code(error_message: Optional[str] = None) -> Optional[str]:
+    """사용자가 창에 입력한 6자리 코드, 취소하면 None을 돌려준다."""
+    result = subprocess.run(_pairing_window_command(error_message), capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _resolve_new_pairing_code(api_base_url: str, error_message: Optional[str] = None) -> str:
+    """새 등록 코드가 필요할 때 부른다.
+
+    배포판은 개발용 `/test/login`을 쓸 수 없다(운영 서버에 그 Endpoint 자체가 없다) —
+    사용자가 웹 화면에서 발급받은 코드를 직접 입력해야 한다. 개발 모드는 지금까지처럼
+    자동 발급으로 편의를 유지한다. `error_message`는 이전 시도가 실패했을 때 그 이유를
+    창에 같이 보여주기 위한 것이다(register()의 재시도 루프에서 넘어온다).
+    """
+    if not is_frozen():
+        return _obtain_pairing_code(api_base_url)
+
+    code = _prompt_for_pairing_code(error_message)
+    if not code:
+        raise RuntimeError("등록이 취소되었습니다.")
+    return code
+
+
 class TrayApp:
     def __init__(self):
         icon_path = resource_path("assets", "trayIcon.png")
@@ -184,9 +216,7 @@ class TrayApp:
 
         api_base_url = self.current_config["apiBaseUrl"]
         has_persisted_identity = identity_store.load() is not None
-        pairing_code = self.current_config["pairingCode"] or (
-            None if has_persisted_identity else _obtain_pairing_code(api_base_url)
-        )
+        configured_code = self.current_config["pairingCode"]
 
         def build_agent(code: Optional[str]) -> ContractPcRunner:
             return ContractPcRunner(
@@ -203,22 +233,45 @@ class TrayApp:
                 )
             )
 
-        self.agent = build_agent(pairing_code)
-        try:
-            self.agent.start()
-        except DeviceRevokedError:
-            # 해제된 기기는 자동 재등록을 시도하지 않는다 — 아래 fallback처럼 새 등록 코드를
-            # 받아 다시 페어링하면 해제를 무시하고 새 기기로 재등록해버리는 꼴이 된다. 사용자가
-            # 직접 재등록해야 한다는 신호이므로 그대로 전파한다(메시지에 서버 안내 문구가 담겨
-            # 있어 setup()의 상태 표시에 그대로 노출된다).
-            raise
-        except Exception:
-            # 저장된 식별 정보로 토큰 갱신까지 실패했는데 pairingCode도 없었던 경우(드묾) —
-            # 새 등록 코드를 받아 한 번만 새로 페어링을 시도한다.
-            if pairing_code or not has_persisted_identity:
+        def register() -> None:
+            """새 등록 코드로 처음부터 페어링한다. 배포판은 실패해도 조용히 포기하지
+            않고, 사용자가 코드를 다시 입력할 수 있도록 오류를 담아 창을 다시 띄운다
+            (RUN-P0-06 완료 조건 — 만료·재사용 코드가 거부되고 다음 행동이 표시됨)."""
+            error_message: Optional[str] = None
+            while True:
+                code = _resolve_new_pairing_code(api_base_url, error_message)
+                self.agent = build_agent(code)
+                try:
+                    self.agent.start()
+                    return
+                except DeviceRevokedError:
+                    raise
+                except Exception as e:
+                    if not is_frozen():
+                        # 개발 모드는 지금까지처럼 즉시 실패로 알린다 — 자동 재시도는
+                        # 무한 루프를 개발자가 알아채기 어렵게 만든다.
+                        raise
+                    error_message = str(e)
+
+        if configured_code or has_persisted_identity:
+            self.agent = build_agent(configured_code)
+            try:
+                self.agent.start()
+                return
+            except DeviceRevokedError:
+                # 해제된 기기는 자동 재등록을 시도하지 않는다 — 아래처럼 새 등록 코드를
+                # 받아 다시 페어링하면 해제를 무시하고 새 기기로 재등록해버리는 꼴이 된다.
+                # 사용자가 직접 재등록해야 한다는 신호이므로 그대로 전파한다(메시지에 서버
+                # 안내 문구가 담겨 있어 setup()의 상태 표시에 그대로 노출된다).
                 raise
-            self.agent = build_agent(_obtain_pairing_code(api_base_url))
-            self.agent.start()
+            except Exception:
+                if configured_code:
+                    # 설정 파일에 명시된 코드가 잘못됐거나 만료됐다 — 자동으로 새로
+                    # 발급받아 재시도하지 않는다(사용자가 설정한 값을 조용히 무시하는 꼴).
+                    raise
+                # 저장된 식별 정보로 토큰 갱신까지 실패했다(드묾) — 새로 등록해야 한다.
+
+        register()
 
     def _refresh_loop(self) -> None:
         while not self._stop_event.wait(REFRESH_INTERVAL_S):

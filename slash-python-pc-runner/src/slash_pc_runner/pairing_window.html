@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>PC 등록</title>
+<style>
+  :root {
+    /* slash-web DESIGN.md 다크 테마 토큰 — folders_window.html과 동일 */
+    --canvas: #0a0c14;
+    --surface: #12141f;
+    --hairline: rgba(255, 255, 255, 0.08);
+    --focus: rgba(93, 143, 255, 0.55);
+    --foreground: #f2f4f8;
+    --muted: #8b8fa3;
+    --accent-blue: #5b8cff;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    background: var(--canvas);
+    color: var(--foreground);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  p.hint { font-size: 13px; color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
+
+  input#code {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    color: var(--foreground);
+    font-family: inherit;
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 10px;
+    text-align: center;
+    padding: 14px 10px;
+    width: 100%;
+    outline: none;
+  }
+  input#code:focus { border-color: var(--focus); }
+  /* 실제 입력과 확실히 구분되도록 두 pseudo-element 다 지정한다(WKWebView 실측 확인 —
+     ::placeholder만으로는 폰트 크기·굵기·자간이 입력값과 똑같이 보였다). */
+  input#code::placeholder,
+  input#code::-webkit-input-placeholder {
+    color: var(--muted);
+    letter-spacing: normal;
+    font-size: 14px;
+    font-weight: 400;
+    opacity: 1;
+  }
+
+  p.error { font-size: 13px; color: var(--danger); min-height: 18px; margin: 10px 0 0; }
+
+  .spacer { flex: 1; }
+
+  .footer { display: flex; justify-content: flex-end; gap: 8px; }
+  button.primary, button.secondary {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 9px 20px;
+    border-radius: 9999px;
+    cursor: pointer;
+    border: none;
+  }
+  button.primary { background: var(--accent-blue); color: #fff; }
+  button.primary:hover { opacity: 0.9; }
+  button.primary:disabled { opacity: 0.5; cursor: default; pointer-events: none; }
+  button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--hairline); }
+  button.secondary:hover { color: var(--foreground); border-color: var(--foreground); }
+</style>
+</head>
+<body>
+  <h1>PC 등록</h1>
+  <p class="hint">웹 화면에서 발급받은 6자리 등록 코드를 입력하세요.</p>
+  <input id="code" inputmode="numeric" maxlength="6" placeholder="000000" autofocus />
+  <p class="error" id="error">{{ERROR_MESSAGE}}</p>
+  <div class="spacer"></div>
+  <div class="footer">
+    <button class="secondary" onclick="onCancel()">취소</button>
+    <button class="primary" id="submitBtn" onclick="onSubmit()" disabled>확인</button>
+  </div>
+
+<script>
+  const input = document.getElementById('code');
+  const submitBtn = document.getElementById('submitBtn');
+  const errorEl = document.getElementById('error');
+
+  input.addEventListener('input', () => {
+    input.value = input.value.replace(/[^0-9]/g, '').slice(0, 6);
+    submitBtn.disabled = input.value.length !== 6;
+    errorEl.textContent = '';
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !submitBtn.disabled) onSubmit();
+  });
+
+  function onSubmit() {
+    if (input.value.length !== 6) return;
+    submitBtn.disabled = true;
+    pywebview.api.submit(input.value);
+  }
+
+  function onCancel() {
+    pywebview.api.cancel();
+  }
+</script>
+</body>
+</html>
