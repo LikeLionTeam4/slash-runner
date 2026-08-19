@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
+from ._build_info import get_agent_version
+
 
 def _post_json(url: str, body: dict, headers: Optional[dict] = None) -> dict:
     """페어링 REST 응답은 {data,meta} 봉투를 쓴다 (메시지 프로토콜 문서 §3.3)."""
@@ -47,7 +49,7 @@ def pair_agent(
             "os": "MACOS",
             "architecture": _architecture(),
             "osVersion": platform.platform(),
-            "agentVersion": "slash-pc-runner-py/0.4.0",
+            "agentVersion": get_agent_version(),
         },
         "supportedTaskTypes": supported_task_types,
     }
