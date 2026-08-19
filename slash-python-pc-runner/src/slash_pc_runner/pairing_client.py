@@ -9,6 +9,7 @@ import urllib.request
 from typing import Optional
 
 from ._build_info import get_agent_version
+from .platform_info import detect_architecture, detect_os
 
 
 class DeviceRevokedError(RuntimeError):
@@ -42,10 +43,6 @@ def _post_json(url: str, body: dict, headers: Optional[dict] = None) -> dict:
         raise RuntimeError(f"POST {url} failed: {message}") from e
 
 
-def _architecture() -> str:
-    return "ARM64" if platform.machine() in ("arm64", "aarch64") else "X86_64"
-
-
 def pair_agent(
     api_base_url: str,
     pairing_code: str,
@@ -58,8 +55,8 @@ def pair_agent(
         "publicKey": public_key_base64,
         "device": {
             "name": device_name,
-            "os": "MACOS",
-            "architecture": _architecture(),
+            "os": detect_os(),
+            "architecture": detect_architecture(),
             "osVersion": platform.platform(),
             "agentVersion": get_agent_version(),
         },

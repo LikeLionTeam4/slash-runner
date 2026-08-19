@@ -32,6 +32,7 @@ from .file_actions import reveal_in_file_manager
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import AgentIdentityStore, PersistedAgentIdentity
 from .pairing_client import DeviceRevokedError, pair_agent, refresh_session, verify_pairing
+from .platform_info import detect_architecture, detect_os
 from .processed_task_store import ProcessedTaskStore
 from .protocol import (
     build_challenge_signing_payload,
@@ -370,8 +371,8 @@ class ContractPcRunner:
         return dict(
             deviceId=self._device_id,
             agentVersion=get_agent_version(),
-            os="MACOS",
-            architecture="ARM64" if platform.machine() in ("arm64", "aarch64") else "X86_64",
+            os=detect_os(),
+            architecture=detect_architecture(),
             osVersion=platform.platform(),
             supportedTaskTypes=list(SUPPORTED_TASK_TYPES),
         )
