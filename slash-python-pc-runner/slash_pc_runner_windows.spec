@@ -6,6 +6,7 @@
 #
 # 빌드(Windows에서): cd slash-python-pc-runner && pyinstaller slash_pc_runner_windows.spec
 
+import subprocess
 from pathlib import Path
 
 block_cipher = None
@@ -13,10 +14,27 @@ project_root = Path(SPECPATH)
 repo_root = project_root.parent
 package_dir = project_root / "src" / "slash_pc_runner"
 
+# 빌드 시점 커밋 SHA·날짜를 파일로 남겨서 함께 얼린다(_build_info.py가 런타임에 읽는다) —
+# CI뿐 아니라 이 명령으로 직접 로컬에서 빌드해도 항상 정확한 값이 들어간다.
+def _write_build_info() -> None:
+    def _git(*args: str) -> str:
+        result = subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True, timeout=5)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    (package_dir / "_build_sha.txt").write_text(_git("rev-parse", "--short", "HEAD"), encoding="utf-8")
+    (package_dir / "_build_date.txt").write_text(
+        _git("log", "-1", "--format=%cd", "--date=format:%Y%m%d"), encoding="utf-8"
+    )
+
+
+_write_build_info()
+
 datas = [
     (str(package_dir / "folders_window.html"), "."),
     (str(package_dir / "assets"), "assets"),
     (str(repo_root / "fixtures" / "search-folder"), "fixtures/search-folder"),
+    (str(package_dir / "_build_sha.txt"), "."),
+    (str(package_dir / "_build_date.txt"), "."),
 ]
 
 a = Analysis(

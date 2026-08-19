@@ -25,6 +25,7 @@ import pystray
 from PIL import Image
 
 from . import single_instance
+from ._build_info import PACKAGE_VERSION, get_build_date, get_build_sha
 from .agent import ContractPcRunner, ContractPcRunnerOptions
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
@@ -125,12 +126,21 @@ class TrayApp:
         self._status_text = "상태: 연결 중..."
         self._device_text = "기기 ID: -"
         self._api_text = "mock-api: -"
+        # 버전·커밋·빌드일자는 프로세스 실행 중 안 바뀌므로 한 번만 계산한다(_build_info.py
+        # 참고). docker version/kubectl version처럼 줄을 나눠 보여준다 — 배포 문제
+        # 재검증 요청 시 이 세 줄만 보고 정확히 어느 빌드인지, 최신인지 바로 확인할 수 있다.
+        self._version_text = f"버전: {PACKAGE_VERSION}"
+        self._commit_text = f"커밋: {get_build_sha()}"
+        self._build_date_text = f"빌드: {get_build_date()}"
         self._stop_event = threading.Event()
 
         menu = pystray.Menu(
             pystray.MenuItem(lambda item: self._status_text, None, enabled=False),
             pystray.MenuItem(lambda item: self._device_text, None, enabled=False),
             pystray.MenuItem(lambda item: self._api_text, None, enabled=False),
+            pystray.MenuItem(lambda item: self._version_text, None, enabled=False),
+            pystray.MenuItem(lambda item: self._commit_text, None, enabled=False),
+            pystray.MenuItem(lambda item: self._build_date_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("색인 폴더 관리", self.open_folders_window),
             pystray.MenuItem("설정 폴더 열기", self.open_config_folder),

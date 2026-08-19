@@ -26,6 +26,7 @@ from .code_adapters import (
     RUNNERS as CODE_ADAPTER_RUNNERS,
     ProjectWorkspaceConfig,
 )
+from ._build_info import get_agent_version
 from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pair
 from .file_actions import reveal_in_file_manager
 from .file_index import FileIndexStore, SearchFolderConfig
@@ -368,7 +369,7 @@ class ContractPcRunner:
     def _build_hello(self) -> dict:
         return dict(
             deviceId=self._device_id,
-            agentVersion="slash-pc-runner-py/0.4.0",
+            agentVersion=get_agent_version(),
             os="MACOS",
             architecture="ARM64" if platform.machine() in ("arm64", "aarch64") else "X86_64",
             osVersion=platform.platform(),

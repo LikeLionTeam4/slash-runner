@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from typing import Optional
 
+from ._build_info import get_agent_version
+
 
 class DeviceRevokedError(RuntimeError):
     """서버가 이 기기가 등록 해제됐다고 응답했다(reason code DEVICE_REVOKED).
@@ -59,7 +61,7 @@ def pair_agent(
             "os": "MACOS",
             "architecture": _architecture(),
             "osVersion": platform.platform(),
-            "agentVersion": "slash-pc-runner-py/0.4.0",
+            "agentVersion": get_agent_version(),
         },
         "supportedTaskTypes": supported_task_types,
     }

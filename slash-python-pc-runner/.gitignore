@@ -4,3 +4,6 @@ dist/
 __pycache__/
 *.egg-info/
 *.zip
+# 빌드 시점에 CI/.spec이 커밋 SHA·날짜로 채우는 파일 — _build_info.py 참고
+_build_sha.txt
+_build_date.txt
