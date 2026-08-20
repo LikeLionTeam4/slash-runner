@@ -148,6 +148,26 @@ pyinstaller slash_pc_runner_windows.spec
 스레드 이벤트 루프를 동시에 사용할 수 없기 때문입니다). `search-folders.json` 파일을 통해 실행
 중인 트레이 앱과 동기화되며, 변경 사항은 2초 주기로 감지됩니다.
 
+`CODE_ANALYSIS`(Claude Code·Codex 읽기 전용 분석) 대상 프로젝트 폴더는 설정 폴더의
+`project-workspaces.json`으로 등록합니다. 검색 폴더와 달리 별도 관리 창이 없고(실제 로컬
+프로젝트가 있어야 의미 있는 기능이라 데모 시드도 없습니다), 앱 시작 시 한 번만 읽으므로
+파일을 바꾼 뒤에는 앱을 재시작해야 반영됩니다.
+
+```json
+[
+  {
+    "workspaceId": "ws-slash-runner",
+    "displayName": "slash-runner",
+    "rootPath": "/Users/me/projects/slash-runner"
+  }
+]
+```
+
+`workspaceType`(`GIT_REPOSITORY`/`DIRECTORY`)과 `availableCodeAdapters`는 `rootPath`의 `.git`
+존재 여부와 로컬에 설치된 `claude`·`codex` CLI를 기준으로 자동 판정되어 READY 메시지의
+`projectWorkspaces`로 보고됩니다. 파일이 없거나 비어 있으면 `CODE_ANALYSIS`는
+`WORKSPACE_NOT_FOUND`로 거부됩니다.
+
 > Windows 11에서 개발 모드 실행, PyInstaller 패키징, `Slash.exe` 실행까지 모두 검증을
 > 완료했습니다(위 "빌드 및 실행 파일 생성(PyInstaller) > Windows" 항목 참고).
 

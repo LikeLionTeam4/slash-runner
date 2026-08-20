@@ -28,6 +28,7 @@ from PIL import Image
 from . import single_instance
 from ._build_info import PACKAGE_VERSION, get_build_date, get_build_sha
 from .agent import ContractPcRunner, ContractPcRunnerOptions
+from .code_adapters import ProjectWorkspaceConfig
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
 from .pairing_client import DeviceRevokedError
@@ -39,6 +40,7 @@ CONFIG_DIR = config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 CONFIG_EXAMPLE_PATH = CONFIG_DIR / "config.example.json"
 SEARCH_FOLDERS_PATH = CONFIG_DIR / "search-folders.json"
+PROJECT_WORKSPACES_PATH = CONFIG_DIR / "project-workspaces.json"
 FILE_INDEX_DB_PATH = CONFIG_DIR / "file-index.sqlite3"
 PROCESSED_TASKS_PATH = CONFIG_DIR / "processed-tasks.json"
 
@@ -70,6 +72,18 @@ def _load_search_folders() -> list[dict]:
         return json.loads(SEARCH_FOLDERS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return _default_search_folders()
+
+
+def _load_project_workspaces() -> list[dict]:
+    # search_folders와 달리 데모용 기본값이 없다 — 실제 로컬 프로젝트가 있어야 의미 있는
+    # 기능(CODE_ANALYSIS)이라 억지 시드 데이터를 만들지 않는다. 설정 안 하면 빈 목록이고,
+    # READY의 projectWorkspaces도 비어 있어 CODE_ANALYSIS는 WORKSPACE_NOT_FOUND로 거부된다.
+    if not PROJECT_WORKSPACES_PATH.exists():
+        return []
+    try:
+        return json.loads(PROJECT_WORKSPACES_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
 
 
 def _load_config() -> dict:
@@ -157,6 +171,7 @@ class TrayApp:
         self.current_config: dict = {}
         self._search_folders_mtime: Optional[float] = None
         self.folders_window_proc: Optional[subprocess.Popen] = None
+        self.project_workspaces_window_proc: Optional[subprocess.Popen] = None
         self._status_text = "상태: 연결 중..."
         self._device_text = "기기 ID: -"
         self._api_text = "mock-api: -"
@@ -187,6 +202,7 @@ class TrayApp:
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("색인 폴더 관리", self.open_folders_window),
+            pystray.MenuItem("프로젝트 폴더 관리", self.open_project_workspaces_window),
             pystray.MenuItem("설정 폴더 열기", self.open_config_folder),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("종료", self.quit_app),
@@ -214,6 +230,11 @@ class TrayApp:
         self._search_folders_mtime = SEARCH_FOLDERS_PATH.stat().st_mtime if SEARCH_FOLDERS_PATH.exists() else None
         search_folders = [SearchFolderConfig(f["searchFolderId"], f["displayName"], f["rootPath"]) for f in folders]
 
+        workspaces = _load_project_workspaces()
+        project_workspaces = [
+            ProjectWorkspaceConfig.from_root_path(w["workspaceId"], w["displayName"], w["rootPath"]) for w in workspaces
+        ]
+
         api_base_url = self.current_config["apiBaseUrl"]
         has_persisted_identity = identity_store.load() is not None
         configured_code = self.current_config["pairingCode"]
@@ -230,6 +251,7 @@ class TrayApp:
                     processed_task_store=processed_task_store,
                     search_folders=search_folders,
                     file_index_store=self.file_index_store,
+                    project_workspaces=project_workspaces,
                 )
             )
 
@@ -329,6 +351,14 @@ class TrayApp:
             SEARCH_FOLDERS_PATH.write_text(json.dumps(_load_search_folders(), ensure_ascii=False, indent=2), encoding="utf-8")
         self.folders_window_proc = subprocess.Popen(_folders_window_command())
 
+    def open_project_workspaces_window(self, icon, item) -> None:
+        # search_folders와 달리 파일이 없으면 빈 배열로 시드한다 — 데모 기본값이 없어서
+        # (_load_project_workspaces() 주석 참고) 빈 목록이 정상 상태다.
+        if not PROJECT_WORKSPACES_PATH.exists():
+            PROJECT_WORKSPACES_PATH.parent.mkdir(parents=True, exist_ok=True)
+            PROJECT_WORKSPACES_PATH.write_text("[]", encoding="utf-8")
+        self.project_workspaces_window_proc = subprocess.Popen(_project_workspaces_window_command())
+
     def open_config_folder(self, icon, item) -> None:
         if sys.platform == "win32":
             subprocess.run(["explorer", str(CONFIG_DIR)])
@@ -344,6 +374,8 @@ class TrayApp:
         # 색인 폴더 관리 창은 별도 프로세스라 트레이가 죽어도 저절로 안 닫힌다 — 열려 있으면 같이 정리.
         if self.folders_window_proc is not None and self.folders_window_proc.poll() is None:
             self.folders_window_proc.terminate()
+        if self.project_workspaces_window_proc is not None and self.project_workspaces_window_proc.poll() is None:
+            self.project_workspaces_window_proc.terminate()
         icon.stop()
 
     def setup(self, icon) -> None:
@@ -373,6 +405,13 @@ def _folders_window_command() -> list[str]:
     if is_frozen():
         return [sys.executable, "--folders-window", str(SEARCH_FOLDERS_PATH)]
     return [sys.executable, "-m", "slash_pc_runner.folders_window", str(SEARCH_FOLDERS_PATH)]
+
+
+def _project_workspaces_window_command() -> list[str]:
+    # _folders_window_command()와 동일한 이유(얼린 실행 파일의 진입점이 하나뿐임).
+    if is_frozen():
+        return [sys.executable, "--project-workspaces-window", str(PROJECT_WORKSPACES_PATH)]
+    return [sys.executable, "-m", "slash_pc_runner.project_workspaces_window", str(PROJECT_WORKSPACES_PATH)]
 
 
 def _hide_dock_icon() -> None:

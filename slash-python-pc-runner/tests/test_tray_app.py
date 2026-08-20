@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 
 import pytest
@@ -126,3 +127,34 @@ class TestRefreshLoopSurvivesExceptions:
         app._refresh_loop()
 
         assert calls == []
+
+
+class TestLoadProjectWorkspaces:
+    """CODE_ANALYSIS가 실제 AWS 환경에서 WORKSPACE_NOT_FOUND로 끝나던 원인 — agent.py는
+    project_workspaces를 이미 완전히 지원했지만 tray_app.py가 그 값을 읽어서 넘기지 않았다.
+    search_folders와 달리 데모용 기본값은 없다(README 참고 — 실제 로컬 프로젝트가 있어야
+    의미 있는 기능이라 억지 시드 데이터를 만들지 않는다)."""
+
+    def test_returns_empty_list_when_file_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tray_app, "PROJECT_WORKSPACES_PATH", tmp_path / "project-workspaces.json")
+
+        assert tray_app._load_project_workspaces() == []
+
+    def test_reads_configured_workspaces(self, tmp_path, monkeypatch):
+        path = tmp_path / "project-workspaces.json"
+        path.write_text(
+            json.dumps([{"workspaceId": "w1", "displayName": "내 프로젝트", "rootPath": str(tmp_path)}]),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(tray_app, "PROJECT_WORKSPACES_PATH", path)
+
+        assert tray_app._load_project_workspaces() == [
+            {"workspaceId": "w1", "displayName": "내 프로젝트", "rootPath": str(tmp_path)}
+        ]
+
+    def test_returns_empty_list_on_invalid_json(self, tmp_path, monkeypatch):
+        path = tmp_path / "project-workspaces.json"
+        path.write_text("{invalid", encoding="utf-8")
+        monkeypatch.setattr(tray_app, "PROJECT_WORKSPACES_PATH", path)
+
+        assert tray_app._load_project_workspaces() == []

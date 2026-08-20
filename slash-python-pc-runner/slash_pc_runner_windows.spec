@@ -32,6 +32,7 @@ _write_build_info()
 datas = [
     (str(package_dir / "folders_window.html"), "."),
     (str(package_dir / "pairing_window.html"), "."),
+    (str(package_dir / "project_workspaces_window.html"), "."),
     (str(package_dir / "assets"), "assets"),
     (str(repo_root / "fixtures" / "search-folder"), "fixtures/search-folder"),
     (str(package_dir / "_build_sha.txt"), "."),
