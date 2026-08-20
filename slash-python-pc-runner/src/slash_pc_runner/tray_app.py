@@ -28,6 +28,7 @@ from PIL import Image
 from . import single_instance
 from ._build_info import PACKAGE_VERSION, get_build_date, get_build_sha
 from .agent import ContractPcRunner, ContractPcRunnerOptions
+from .code_adapters import ProjectWorkspaceConfig
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import KeyringIdentityStore
 from .pairing_client import DeviceRevokedError
@@ -39,6 +40,7 @@ CONFIG_DIR = config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 CONFIG_EXAMPLE_PATH = CONFIG_DIR / "config.example.json"
 SEARCH_FOLDERS_PATH = CONFIG_DIR / "search-folders.json"
+PROJECT_WORKSPACES_PATH = CONFIG_DIR / "project-workspaces.json"
 FILE_INDEX_DB_PATH = CONFIG_DIR / "file-index.sqlite3"
 PROCESSED_TASKS_PATH = CONFIG_DIR / "processed-tasks.json"
 
@@ -70,6 +72,18 @@ def _load_search_folders() -> list[dict]:
         return json.loads(SEARCH_FOLDERS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return _default_search_folders()
+
+
+def _load_project_workspaces() -> list[dict]:
+    # search_folders와 달리 데모용 기본값이 없다 — 실제 로컬 프로젝트가 있어야 의미 있는
+    # 기능(CODE_ANALYSIS)이라 억지 시드 데이터를 만들지 않는다. 설정 안 하면 빈 목록이고,
+    # READY의 projectWorkspaces도 비어 있어 CODE_ANALYSIS는 WORKSPACE_NOT_FOUND로 거부된다.
+    if not PROJECT_WORKSPACES_PATH.exists():
+        return []
+    try:
+        return json.loads(PROJECT_WORKSPACES_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
 
 
 def _load_config() -> dict:
@@ -214,6 +228,11 @@ class TrayApp:
         self._search_folders_mtime = SEARCH_FOLDERS_PATH.stat().st_mtime if SEARCH_FOLDERS_PATH.exists() else None
         search_folders = [SearchFolderConfig(f["searchFolderId"], f["displayName"], f["rootPath"]) for f in folders]
 
+        workspaces = _load_project_workspaces()
+        project_workspaces = [
+            ProjectWorkspaceConfig.from_root_path(w["workspaceId"], w["displayName"], w["rootPath"]) for w in workspaces
+        ]
+
         api_base_url = self.current_config["apiBaseUrl"]
         has_persisted_identity = identity_store.load() is not None
         configured_code = self.current_config["pairingCode"]
@@ -230,6 +249,7 @@ class TrayApp:
                     processed_task_store=processed_task_store,
                     search_folders=search_folders,
                     file_index_store=self.file_index_store,
+                    project_workspaces=project_workspaces,
                 )
             )
 
