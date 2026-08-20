@@ -23,7 +23,7 @@ from pathlib import Path
 from .resources import resource_path
 
 # pyproject.toml의 version과 동기화해서 유지한다 — 버전을 올릴 때 여기도 같이 바꾼다.
-PACKAGE_VERSION = "0.4.2"
+PACKAGE_VERSION = "0.5.0"
 
 
 def _repo_root() -> Path:

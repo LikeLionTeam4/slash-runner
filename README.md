@@ -255,7 +255,7 @@ KST `+09:00`). 작업 관련 메시지(TASK/ACK/PROGRESS/RESULT/RESULT_ACK)는 `
 | `PROTOCOL_ERROR` | `code, message, relatedEventId(nullable), closeConnection(bool)` |
 
 > 위 필드 이름(`agentVersion` 등)도 `slash-api`가 정의한 프로토콜 계약의 일부이므로 이 저장소가
-> 단독으로 변경할 수 없습니다. 실제로 서버에 전송하는 **값**은 `slash-pc-runner-py/0.4.2`처럼
+> 단독으로 변경할 수 없습니다. 실제로 서버에 전송하는 **값**은 `slash-pc-runner-py/0.5.0`처럼
 > 패키지 버전을 그대로 담습니다.
 
 `reasonCode`/`error.code` 값: `DEVICE_BUSY, TASK_TYPE_NOT_SUPPORTED, INVALID_PARAMETERS,
