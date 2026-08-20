@@ -15,7 +15,10 @@ def main() -> None:
     if len(sys.argv) >= 3 and sys.argv[1] == "--folders-window":
         from .folders_window import run
 
-        sys.exit(run(sys.argv[2]))
+        # run()은 반환하지 않는다 — Api.save/cancel이나 창 닫기 핸들러가 os._exit()로 이미
+        # 프로세스를 끝낸다(folders_window.py 주석 참고). 여기 도달하면 이례적인 경우다.
+        run(sys.argv[2])
+        sys.exit(1)
 
     if len(sys.argv) >= 2 and sys.argv[1] == "--pairing-window":
         from .pairing_window import main as pairing_main
