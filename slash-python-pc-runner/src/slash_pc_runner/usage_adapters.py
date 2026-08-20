@@ -23,10 +23,18 @@ import json
 import os
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
 from .protocol import now_iso_kst
+
+# 로그 CLI가 남기는 timestamp가 전부 이 형식(UTC, 밀리초, "Z")이라 since 컷오프도 같은
+# 형식으로 맞춰야 문자열 비교가 시간 순서와 일치한다(now_iso_kst()는 KST 오프셋이라 여기
+# 못 씀).
+def _iso_utc_days_ago(days: int) -> str:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return cutoff.strftime("%Y-%m-%dT%H:%M:%S.") + f"{cutoff.microsecond // 1000:03d}Z"
 
 # AI_AGENT_USAGE는 매 호출마다 로그 디렉터리 전체(수백~수천 개 jsonl 파일)를 처음부터 다시
 # 훑는다 — agent.py가 같은 작업 하나에 _validate_task·_execute_task 두 번 호출하는 데다,
@@ -59,16 +67,21 @@ def _codex_root() -> Path:
     return base / "sessions"
 
 
-def collect_claude_code_usage(root: Optional[Path] = None) -> Optional[dict]:
+def collect_claude_code_usage(root: Optional[Path] = None, since: Optional[str] = None) -> Optional[dict]:
     resolved_root = root or _claude_code_root()
-    return _cached(f"CLAUDE_CODE:{resolved_root}", lambda: _collect_claude_code_usage(resolved_root))
+    return _cached(
+        f"CLAUDE_CODE:{resolved_root}:{since or ''}", lambda: _collect_claude_code_usage(resolved_root, since)
+    )
 
 
-def _collect_claude_code_usage(root: Path) -> Optional[dict]:
+def _collect_claude_code_usage(root: Path, since: Optional[str] = None) -> Optional[dict]:
     """
     세션 파일(jsonl) 하나당 여러 assistant 턴이 있고, 각 턴의 message.usage는 그 턴 하나의
     값(Anthropic Messages API 관례 — 누적 아님)이라 파일 안의 모든 usage를 더하면 그 세션의
     합계가 나온다.
+
+    since를 주면 그 시각(ISO 8601, timestamp 필드와 같은 형식) 이후의 턴만 더한다 —
+    문자열 비교만으로 충분한 이유는 timestamp가 전부 UTC "Z" 표기라서다.
     """
     if not root.exists():
         return None
@@ -93,12 +106,14 @@ def _collect_claude_code_usage(root: Path) -> Optional[dict]:
                     usage = entry.get("message", {}).get("usage") if isinstance(entry.get("message"), dict) else None
                     if not usage:
                         continue
+                    timestamp = entry.get("timestamp")
+                    if since is not None and (not isinstance(timestamp, str) or timestamp < since):
+                        continue
                     session_has_usage = True
                     total_input += usage.get("input_tokens", 0) or 0
                     total_output += usage.get("output_tokens", 0) or 0
                     total_cache_read += usage.get("cache_read_input_tokens", 0) or 0
                     total_cache_creation += usage.get("cache_creation_input_tokens", 0) or 0
-                    timestamp = entry.get("timestamp")
                     if isinstance(timestamp, str):
                         if oldest is None or timestamp < oldest:
                             oldest = timestamp
@@ -124,15 +139,20 @@ def _collect_claude_code_usage(root: Path) -> Optional[dict]:
     }
 
 
-def collect_codex_usage(root: Optional[Path] = None) -> Optional[dict]:
+def collect_codex_usage(root: Optional[Path] = None, since: Optional[str] = None) -> Optional[dict]:
     resolved_root = root or _codex_root()
-    return _cached(f"CODEX:{resolved_root}", lambda: _collect_codex_usage(resolved_root))
+    return _cached(f"CODEX:{resolved_root}:{since or ''}", lambda: _collect_codex_usage(resolved_root, since))
 
 
-def _collect_codex_usage(root: Path) -> Optional[dict]:
+def _collect_codex_usage(root: Path, since: Optional[str] = None) -> Optional[dict]:
     """
     token_count 이벤트의 total_token_usage는 그 시점까지의 누적 스냅샷이다(턴 하나의 값이
     아님) — Claude Code와 달리 더하면 안 되고, 세션의 마지막 이벤트 하나만 그 세션 합계로 쓴다.
+
+    since를 주면 **마지막 활동 시각이 그 이후인 세션만** 합계에 넣는다(세션이 시작한 시각이
+    아니라 끝난 시각 기준) — 값 자체가 세션 전체 누적이라 기간 안에서 일어난 사용량만 정확히
+    분리해 낼 방법이 없다. "최근 활동한 세션들의 전체 누적"이라 실제보다 살짝 과대 집계될 수
+    있는 근사치다.
     """
     if not root.exists():
         return None
@@ -173,6 +193,8 @@ def _collect_codex_usage(root: Path) -> Optional[dict]:
 
         if last_usage is None:
             continue
+        if since is not None and (last_timestamp is None or last_timestamp < since):
+            continue
         total_sessions += 1
         total_input += last_usage.get("input_tokens", 0) or 0
         total_output += last_usage.get("output_tokens", 0) or 0
@@ -202,3 +224,14 @@ COLLECTORS = {
     "CLAUDE_CODE": collect_claude_code_usage,
     "CODEX": collect_codex_usage,
 }
+
+
+def collect_usage_last_7_days(provider: str) -> Optional[dict]:
+    """CODE_ANALYSIS(/code) 결과에 함께 실어 보내는 최근 7일 사용량 — 구독 레이트리밋을
+    /code가 사용자 본인의 다른 Claude Code·Codex 사용과 같은 풀에서 나눠 쓰기 때문에,
+    지금 얼마나 썼는지 결과와 함께 보여준다(별도 AI_AGENT_USAGE 조회 없이).
+    """
+    collector = COLLECTORS.get(provider)
+    if collector is None:
+        return None
+    return collector(since=_iso_utc_days_ago(7))

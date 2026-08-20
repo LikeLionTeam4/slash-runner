@@ -513,6 +513,7 @@ class ContractPcRunner:
             correlationId=message["correlationId"],
             stage="EXECUTING",
             percent=0,
+            **self._progress_message_for(message["taskType"]),
         )
 
         self._running_task_id = message["taskId"]
@@ -567,9 +568,18 @@ class ContractPcRunner:
                     correlationId=message["correlationId"],
                     stage="EXECUTING",
                     percent=percent,
+                    **self._progress_message_for(message["taskType"]),
                 )
             except ConnectionClosed:
                 return
+
+    def _progress_message_for(self, task_type: str) -> dict:
+        # CODE_ANALYSIS만 최대 300초까지 걸릴 수 있어 안내 문구가 필요하다 — 다른 TaskType은
+        # 대부분 몇 초 안에 끝나 문구를 붙일 이유가 없다. message는 PROGRESS의 선택 필드라
+        # (README 메시지 프로토콜 §2 참고) 해당 없으면 아예 안 보낸다.
+        if task_type != "CODE_ANALYSIS":
+            return {}
+        return {"message": "코드를 분석하고 있어요. 최대 5분까지 걸릴 수 있어요."}
 
     def _send_turn_progress(self, socket, message: dict, turn: int) -> None:
         # CODEX 어댑터는 item.completed 이벤트로 턴 완료를 실시간으로 알 수 있어, 15초
@@ -585,6 +595,7 @@ class ContractPcRunner:
                 correlationId=message["correlationId"],
                 stage="EXECUTING",
                 percent=percent,
+                message=f"{turn}번째 응답을 처리했어요.",
             )
         except ConnectionClosed:
             pass

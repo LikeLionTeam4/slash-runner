@@ -147,11 +147,29 @@ def test_codex_streams_turn_progress_via_wss(server, tmp_path, monkeypatch):
         result = server.wait_for_message("RESULT")
         assert result["status"] == "SUCCEEDED"
 
-        progress_percents = [m["percent"] for m in server.received_messages if m.get("type") == "PROGRESS"]
+        progress_messages = [m for m in server.received_messages if m.get("type") == "PROGRESS"]
         # 초기 0%(작업 시작 시 고정 전송) 뒤로 턴 1·2 완료 시의 실시간 신호(10, 20)가 순서대로 온다.
-        assert progress_percents == [0, 10, 20]
+        assert [m["percent"] for m in progress_messages] == [0, 10, 20]
+        # 최대 300초까지 걸릴 수 있다는 안내가 초기 신호에 있어야, 웹이 나중에 결과 카드를
+        # 붙였을 때 "멈춘 게 아니라 오래 걸리는 것"이라는 걸 사용자에게 바로 보여줄 수 있다.
+        assert progress_messages[0]["message"] == "코드를 분석하고 있어요. 최대 5분까지 걸릴 수 있어요."
+        # 턴 완료 신호는 몇 번째 응답인지를 담아, 초기 안내와는 다른 더 구체적인 문구를 준다.
+        assert progress_messages[1]["message"] == "1번째 응답을 처리했어요."
+        assert progress_messages[2]["message"] == "2번째 응답을 처리했어요."
     finally:
         agent.stop()
+
+
+def test_progress_message_only_attached_for_code_analysis():
+    # SYSTEM_STATUS·FILE_SEARCH 등은 보통 몇 초 안에 끝나 안내 문구가 필요 없다 — CODE_ANALYSIS만
+    # 최대 300초까지 걸릴 수 있어 예외적으로 붙인다.
+    agent = ContractPcRunner(ContractPcRunnerOptions(api_base_url="http://unused"))
+
+    assert agent._progress_message_for("CODE_ANALYSIS") == {
+        "message": "코드를 분석하고 있어요. 최대 5분까지 걸릴 수 있어요."
+    }
+    assert agent._progress_message_for("SYSTEM_STATUS") == {}
+    assert agent._progress_message_for("FILE_SEARCH") == {}
 
 
 class TestResultTruncation:
