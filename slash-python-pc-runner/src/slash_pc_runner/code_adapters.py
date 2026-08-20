@@ -35,6 +35,18 @@ from .usage_adapters import collect_usage_last_7_days
 _CLAUDE_DISALLOWED_TOOLS = "Write,Edit,Bash"
 # 10이었을 때 실측 3회 중 1회꼴로 error_max_turns 실패 — Bash가 막혀 있으니 모델이 몇 번
 # 시도하다 거부당하고 Glob/Read로 전환하는 데 턴을 더 쓴다. 20으로 올려 그 여유를 준다.
+#
+# 읽기 전용 보장이 --disallowed-tools·--sandbox 같은 CLI 플래그 자체에 의존한다는 게 이
+# 코드의 알려진 위험이다 — CLI가 업데이트되며 플래그가 조용히 바뀌면 알아챌 방법이 없다.
+# 실제로 2026-08-20 기준 설치된 Claude Code(2.1.226)에서 --max-turns가 `claude --help`
+# 목록에서 빠진 것을 확인했다 — 다만 `claude -p ... --max-turns 5`를 직접 실행해보면
+# 여전히 정상 동작한다(문서에서만 빠지고 기능은 남아 있는 경우). `--help` 텍스트에 플래그가
+# 있는지를 확인하는 자동 시험은 이런 경우 거짓으로 실패하므로 신뢰할 수 없고, 실제 CLI를
+# 호출하는 시험은 매번 진짜 API 비용이 들어 일반 테스트 스위트에 넣기엔 부적절하다 — 그래서
+# 자동화된 안전장치 대신 이 사실을 여기 기록해 둔다. 이후 --disallowed-tools·--sandbox
+# read-only·--skip-git-repo-check 중 하나라도 정상 동작하지 않는 게 확인되면(RESULT.FAILED가
+# 갑자기 늘거나, 읽기 전용 보장이 의심되면) 가장 먼저 `claude --help`/`codex exec --help`로
+# 플래그 목록이 바뀌었는지부터 확인할 것.
 _MAX_TURNS = 20
 _DEFAULT_TIMEOUT_S = 300
 
