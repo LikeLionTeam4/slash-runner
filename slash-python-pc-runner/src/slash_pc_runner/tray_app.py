@@ -274,8 +274,14 @@ class TrayApp:
         register()
 
     def _refresh_loop(self) -> None:
+        # daemon 스레드 안에서 예외가 나면 조용히 스레드가 죽고 다시 안 살아난다 — 그러면
+        # 상태·기기ID 표시가 최초 상태(__init__ 기본값)에 영원히 멈춘 채로 남는데, 화면에는
+        # 아무 에러도 안 보여서 원인을 알기 어렵다. 한 번 실패해도 다음 주기에 계속 시도한다.
         while not self._stop_event.wait(REFRESH_INTERVAL_S):
-            self.refresh()
+            try:
+                self.refresh()
+            except Exception as e:
+                _log(f"트레이 갱신 실패(다음 주기에 재시도): {e}")
 
     def _check_for_update_once(self) -> None:
         # 네트워크 호출이라 별도 스레드에서 한다 — setup()의 트레이 초기화(아이콘 표시,
@@ -351,6 +357,11 @@ class TrayApp:
         # 것과 같은 종류의 순서 문제라, Dock 숨김도 여기서(icon.run() 진입 이후) 걸어야 한다.
         _hide_dock_icon()
         icon.visible = True
+        # 버전·커밋·빌드일자 같은 정적 텍스트도 update_menu()를 최소 한 번 호출해야
+        # 네이티브 메뉴에 실제로 그려진다 — refresh()의 update_menu() 호출이
+        # self.agent 조건에 묶여 있어서, 에이전트가 아직 연결 중이거나 그 스레드가
+        # 예외로 죽으면 이 줄들이 영원히 빈 채로 남는 버그가 있었다.
+        icon.update_menu()
         threading.Thread(target=self._refresh_loop, daemon=True).start()
         threading.Thread(target=self._check_for_update_once, daemon=True).start()
 
