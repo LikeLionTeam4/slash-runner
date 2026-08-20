@@ -54,6 +54,15 @@ def codex_available() -> bool:
     return shutil.which("codex") is not None
 
 
+def _ensure_workspace_exists(workspace_path: Path) -> None:
+    # subprocess.run/Popen은 cwd가 없어도 FileNotFoundError를 던진다 — CLI 실행 파일이
+    # 없을 때(claude_code_available() 등이 이미 걸러내는 경우)와 똑같은 예외라, 워크스페이스
+    # 폴더를 사용자가 지우거나 옮기면 "CLI가 설치 안 됨"이라는 엉뚱한 메시지가 나갔다
+    # (실측 확인한 버그). 실행 전에 미리 확인해 정확한 원인을 메시지에 남긴다.
+    if not workspace_path.is_dir():
+        raise CodeAdapterError(f"워크스페이스 폴더를 찾을 수 없습니다: {workspace_path}")
+
+
 def _parse_claude_code_output(stdout: str) -> tuple[str, Optional[int]]:
     try:
         data = json.loads(stdout)
@@ -79,6 +88,7 @@ def _parse_claude_code_output(stdout: str) -> tuple[str, Optional[int]]:
 def run_claude_code_analysis(workspace_path: Path, query: str, timeout_s: int = _DEFAULT_TIMEOUT_S) -> dict:
     if not claude_code_available():
         raise CodeAdapterNotConfiguredError("claude CLI가 PATH에 없습니다")
+    _ensure_workspace_exists(workspace_path)
 
     started = time.monotonic()
     args = [
@@ -144,6 +154,7 @@ def run_codex_analysis(
     """
     if not codex_available():
         raise CodeAdapterNotConfiguredError("codex CLI가 PATH에 없습니다")
+    _ensure_workspace_exists(workspace_path)
 
     started = time.monotonic()
     # git 저장소가 아닌 DIRECTORY 워크스페이스(ProjectWorkspaceConfig.workspace_type)에서는

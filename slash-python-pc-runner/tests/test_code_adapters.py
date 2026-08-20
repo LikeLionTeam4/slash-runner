@@ -81,6 +81,19 @@ class TestClaudeCodeAnalysis:
         with pytest.raises(CodeAdapterError):
             run_claude_code_analysis(tmp_path, "설명해줘", timeout_s=1)
 
+    def test_raises_code_adapter_error_not_not_configured_when_workspace_missing(self, monkeypatch, tmp_path):
+        # 실측 확인한 버그 재발 방지 — 워크스페이스 폴더가 없으면 subprocess.run이 CLI
+        # 실행 파일이 없을 때와 똑같은 FileNotFoundError를 던진다. CLI는 있는데 폴더만
+        # 없는 경우를 "CLI 설치 안 됨"(CodeAdapterNotConfiguredError)으로 잘못 보고하면
+        # 안 된다 — CodeAdapterError여야 하고, 메시지에 원인이 정확히 남아야 한다.
+        monkeypatch.setattr(code_adapters, "claude_code_available", lambda: True)
+        missing_path = tmp_path / "존재안함"
+
+        with pytest.raises(CodeAdapterError, match="워크스페이스 폴더를 찾을 수 없습니다") as exc_info:
+            run_claude_code_analysis(missing_path, "설명해줘")
+
+        assert not isinstance(exc_info.value, CodeAdapterNotConfiguredError)
+
 
 class FakePopen:
     """Popen(stdout=PIPE, stderr=PIPE, text=True) 대역 — 라인 리스트를 스트리밍처럼 순회시킨다."""
@@ -172,6 +185,17 @@ class TestCodexAnalysis:
         )
         with pytest.raises(CodeAdapterError):
             run_codex_analysis(tmp_path, "설명해줘")
+
+    def test_raises_code_adapter_error_not_not_configured_when_workspace_missing(self, monkeypatch, tmp_path):
+        # TestClaudeCodeAnalysis의 같은 이름 시험과 동일한 이유 — Codex도 같은 종류의
+        # FileNotFoundError 오분류가 있었다.
+        monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
+        missing_path = tmp_path / "존재안함"
+
+        with pytest.raises(CodeAdapterError, match="워크스페이스 폴더를 찾을 수 없습니다") as exc_info:
+            run_codex_analysis(missing_path, "설명해줘")
+
+        assert not isinstance(exc_info.value, CodeAdapterNotConfiguredError)
 
     def test_calls_on_turn_complete_as_each_turn_finishes(self, monkeypatch, tmp_path):
         monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
