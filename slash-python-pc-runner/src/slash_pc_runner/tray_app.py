@@ -30,7 +30,7 @@ from ._build_info import PACKAGE_VERSION, get_build_date, get_build_sha
 from .agent import ContractPcRunner, ContractPcRunnerOptions
 from .code_adapters import ProjectWorkspaceConfig
 from .file_index import FileIndexStore, SearchFolderConfig
-from .identity_store import KeyringIdentityStore
+from .identity_store import FileIdentityStore, KeyringIdentityStore
 from .pairing_client import DeviceRevokedError
 from .processed_task_store import JsonFileProcessedTaskStore
 from .resources import config_dir, is_frozen, repo_fixtures_search_folder, resource_path
@@ -43,6 +43,7 @@ SEARCH_FOLDERS_PATH = CONFIG_DIR / "search-folders.json"
 PROJECT_WORKSPACES_PATH = CONFIG_DIR / "project-workspaces.json"
 FILE_INDEX_DB_PATH = CONFIG_DIR / "file-index.sqlite3"
 PROCESSED_TASKS_PATH = CONFIG_DIR / "processed-tasks.json"
+IDENTITY_PATH = CONFIG_DIR / "device-identity.json"
 
 REFRESH_INTERVAL_S = 2.0
 
@@ -222,7 +223,14 @@ class TrayApp:
             )
 
         self.current_config = _load_config()
-        identity_store = KeyringIdentityStore(service_name="slash-pc-runner-py-app")
+        # 예전엔 KeyringIdentityStore(Keychain)만 썼다 — ad-hoc 서명 빌드마다 접근 권한이
+        # 깨져 재빌드·업데이트할 때마다 재등록해야 하는 문제가 있어 파일 저장으로 옮겼다.
+        # legacy_keyring_store를 넘겨 이미 페어링된 사용자는 첫 실행 때 한 번만 자동으로
+        # 옮겨지게 한다(identity_store.py 상단 주석 참고).
+        identity_store = FileIdentityStore(
+            IDENTITY_PATH,
+            legacy_keyring_store=KeyringIdentityStore(service_name="slash-pc-runner-py-app"),
+        )
         processed_task_store = JsonFileProcessedTaskStore(PROCESSED_TASKS_PATH)
         self.file_index_store = FileIndexStore(str(FILE_INDEX_DB_PATH))
 

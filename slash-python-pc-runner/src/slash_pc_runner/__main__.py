@@ -12,6 +12,13 @@ import sys
 
 
 def main() -> None:
+    # 다른 어떤 분기보다 먼저 — single_instance.py의 락 파일 생성을 포함해 config_dir()를
+    # 쓰는 모든 코드보다 앞서야 마이그레이션이 "새 폴더가 아직 없다" 조건을 안전하게 본다
+    # (resources.migrate_legacy_config_dir() 주석 참고).
+    from .resources import migrate_legacy_config_dir
+
+    migrate_legacy_config_dir()
+
     if len(sys.argv) >= 3 and sys.argv[1] == "--folders-window":
         from .folders_window import run
 
