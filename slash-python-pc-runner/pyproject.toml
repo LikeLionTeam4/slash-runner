@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "slash-pc-runner"
-version = "0.4.2"
+version = "0.5.0"
 description = "Slash 로컬 실행기(PC 작업 실행기) — Python 구현 (Electron agent-app 대체)"
 requires-python = ">=3.11"
 dependencies = [
