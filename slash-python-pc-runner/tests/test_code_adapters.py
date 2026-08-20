@@ -144,6 +144,20 @@ class TestCodexAnalysis:
         assert result["summary"] == "마지막"
         assert result["turns"] == 2
 
+    def test_passes_skip_git_repo_check_flag(self, monkeypatch, tmp_path):
+        """git 저장소가 아닌 DIRECTORY 워크스페이스에서는 이 플래그가 없으면 codex CLI가
+        "Not inside a trusted directory" 로 거부한다(실제 CLI로 재현 확인함)."""
+        monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
+        captured_args = {}
+
+        def fake_popen(args, **kwargs):
+            captured_args["args"] = args
+            return FakePopen(['{"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}}\n'])
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        run_codex_analysis(tmp_path, "설명해줘")
+        assert "--skip-git-repo-check" in captured_args["args"]
+
     def test_falls_back_to_raw_output_when_no_agent_message(self, monkeypatch, tmp_path):
         monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
         monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakePopen(["예상 밖 출력\n"]))
