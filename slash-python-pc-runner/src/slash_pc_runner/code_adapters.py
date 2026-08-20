@@ -146,7 +146,9 @@ def run_codex_analysis(
         raise CodeAdapterNotConfiguredError("codex CLI가 PATH에 없습니다")
 
     started = time.monotonic()
-    args = ["codex", "exec", "--sandbox", "read-only", "--json", query]
+    # git 저장소가 아닌 DIRECTORY 워크스페이스(ProjectWorkspaceConfig.workspace_type)에서는
+    # 이 플래그가 없으면 codex CLI가 "Not inside a trusted directory"로 거부한다.
+    args = ["codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--json", query]
     try:
         proc = subprocess.Popen(
             args, cwd=str(workspace_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
