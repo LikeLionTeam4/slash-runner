@@ -171,6 +171,7 @@ class TrayApp:
         self.current_config: dict = {}
         self._search_folders_mtime: Optional[float] = None
         self.folders_window_proc: Optional[subprocess.Popen] = None
+        self.project_workspaces_window_proc: Optional[subprocess.Popen] = None
         self._status_text = "상태: 연결 중..."
         self._device_text = "기기 ID: -"
         self._api_text = "mock-api: -"
@@ -201,6 +202,7 @@ class TrayApp:
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("색인 폴더 관리", self.open_folders_window),
+            pystray.MenuItem("프로젝트 폴더 관리", self.open_project_workspaces_window),
             pystray.MenuItem("설정 폴더 열기", self.open_config_folder),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("종료", self.quit_app),
@@ -349,6 +351,14 @@ class TrayApp:
             SEARCH_FOLDERS_PATH.write_text(json.dumps(_load_search_folders(), ensure_ascii=False, indent=2), encoding="utf-8")
         self.folders_window_proc = subprocess.Popen(_folders_window_command())
 
+    def open_project_workspaces_window(self, icon, item) -> None:
+        # search_folders와 달리 파일이 없으면 빈 배열로 시드한다 — 데모 기본값이 없어서
+        # (_load_project_workspaces() 주석 참고) 빈 목록이 정상 상태다.
+        if not PROJECT_WORKSPACES_PATH.exists():
+            PROJECT_WORKSPACES_PATH.parent.mkdir(parents=True, exist_ok=True)
+            PROJECT_WORKSPACES_PATH.write_text("[]", encoding="utf-8")
+        self.project_workspaces_window_proc = subprocess.Popen(_project_workspaces_window_command())
+
     def open_config_folder(self, icon, item) -> None:
         if sys.platform == "win32":
             subprocess.run(["explorer", str(CONFIG_DIR)])
@@ -364,6 +374,8 @@ class TrayApp:
         # 색인 폴더 관리 창은 별도 프로세스라 트레이가 죽어도 저절로 안 닫힌다 — 열려 있으면 같이 정리.
         if self.folders_window_proc is not None and self.folders_window_proc.poll() is None:
             self.folders_window_proc.terminate()
+        if self.project_workspaces_window_proc is not None and self.project_workspaces_window_proc.poll() is None:
+            self.project_workspaces_window_proc.terminate()
         icon.stop()
 
     def setup(self, icon) -> None:
@@ -393,6 +405,13 @@ def _folders_window_command() -> list[str]:
     if is_frozen():
         return [sys.executable, "--folders-window", str(SEARCH_FOLDERS_PATH)]
     return [sys.executable, "-m", "slash_pc_runner.folders_window", str(SEARCH_FOLDERS_PATH)]
+
+
+def _project_workspaces_window_command() -> list[str]:
+    # _folders_window_command()와 동일한 이유(얼린 실행 파일의 진입점이 하나뿐임).
+    if is_frozen():
+        return [sys.executable, "--project-workspaces-window", str(PROJECT_WORKSPACES_PATH)]
+    return [sys.executable, "-m", "slash_pc_runner.project_workspaces_window", str(PROJECT_WORKSPACES_PATH)]
 
 
 def _hide_dock_icon() -> None:

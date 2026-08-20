@@ -20,6 +20,14 @@ def main() -> None:
         run(sys.argv[2])
         sys.exit(1)
 
+    if len(sys.argv) >= 3 and sys.argv[1] == "--project-workspaces-window":
+        from .project_workspaces_window import run
+
+        # run()은 반환하지 않는다 — Api.save/cancel이나 창 닫기 핸들러가 os._exit()로
+        # 프로세스를 직접 끝낸다(project_workspaces_window.py 주석 참고).
+        run(sys.argv[2])
+        sys.exit(1)
+
     if len(sys.argv) >= 2 and sys.argv[1] == "--pairing-window":
         from .pairing_window import main as pairing_main
 
