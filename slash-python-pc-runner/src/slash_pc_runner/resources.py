@@ -16,14 +16,31 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-def config_dir(app_name: str = "slash-pc-runner-py") -> Path:
+def config_dir() -> Path:
     """앱 설정·상태 저장 디렉터리 — OS별 관례 경로로 분기한다.
-    Windows는 %APPDATA%(없으면 홈 폴더 밑 AppData\\Roaming으로 폴백), 그 외(macOS)는
-    Application Support를 쓴다."""
+    Windows는 %APPDATA%(없으면 홈 폴더 밑 AppData\\Roaming으로 폴백)에
+    slash-pc-runner-py를 쓴다. macOS는 Application Support 아래 폴더명을 제품명
+    그대로 "slash"로 둔다 — Finder에서 사용자에게 그대로 보이는 이름이라, 패키지명보다
+    실제 앱 이름(Slash)에 가까운 쪽이 낫다는 판단이다."""
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
-        return base / app_name
-    return Path.home() / "Library" / "Application Support" / app_name
+        return base / "slash-pc-runner-py"
+    return Path.home() / "Library" / "Application Support" / "slash"
+
+
+def migrate_legacy_config_dir() -> None:
+    """이전 폴더명(slash-pc-runner-py)으로 macOS에 이미 저장돼 있던 설정·페어링 정보를
+    새 폴더명(slash)으로 옮긴다. config_dir()를 쓰는 어떤 코드보다도 먼저, 앱 시작
+    시점에 한 번만 호출해야 한다 — 새 폴더가 먼저 만들어지면(예: 락 파일) 아래
+    "새 폴더가 아직 없다" 조건이 깨져 마이그레이션을 건너뛴다.
+
+    Windows는 폴더명을 안 바꿨으니 옮길 게 없다."""
+    if sys.platform == "win32":
+        return
+    old_dir = Path.home() / "Library" / "Application Support" / "slash-pc-runner-py"
+    new_dir = config_dir()
+    if old_dir.exists() and not new_dir.exists():
+        old_dir.rename(new_dir)
 
 
 def resource_path(*parts: str) -> Path:
