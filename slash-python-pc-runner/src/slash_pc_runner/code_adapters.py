@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .protocol import now_iso_kst
+from .usage_adapters import collect_usage_last_7_days
 
 # Claude Code 쪽에 파일 변경 도구를 아예 안 주는 것 — 프롬프트가 뭐라고 하든 구조적으로 차단.
 _CLAUDE_DISALLOWED_TOOLS = "Write,Edit,Bash"
@@ -44,6 +45,16 @@ class CodeAdapterNotConfiguredError(Exception):
 
 class CodeAdapterError(Exception):
     """CLI는 있지만 실행이 실패함 — 인증 안 됨·타임아웃·비정상 종료 등 원인 불문."""
+
+
+def _last_7_days_usage(provider: str) -> Optional[dict]:
+    # 구독 레이트리밋 공유 — /code가 사용자 본인의 다른 Claude Code·Codex 사용과 같은
+    # 사용량 풀을 나눠 쓰기 때문에, 결과와 함께 지금까지 얼마나 썼는지 보여준다. 부가
+    # 정보라 이게 실패해도 CODE_ANALYSIS 결과 자체는 실패시키지 않는다.
+    try:
+        return collect_usage_last_7_days(provider)
+    except Exception:
+        return None
 
 
 def claude_code_available() -> bool:
@@ -63,26 +74,44 @@ def _ensure_workspace_exists(workspace_path: Path) -> None:
         raise CodeAdapterError(f"워크스페이스 폴더를 찾을 수 없습니다: {workspace_path}")
 
 
-def _parse_claude_code_output(stdout: str) -> tuple[str, Optional[int]]:
+def _extract_claude_code_this_run_usage(data: dict) -> Optional[dict]:
+    # claude -p --output-format json은 usage·total_cost_usd를 최상위에 직접 담아 준다
+    # (실측 확인 — claude -p "1+1은?" --output-format json으로 원본 응답을 그대로 봤다).
+    # 세션 로그를 다시 훑을 필요 없이 이 응답 하나로 "이번 실행" 사용량을 바로 알 수 있다.
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return {
+        "inputTokens": usage.get("input_tokens", 0) or 0,
+        "outputTokens": usage.get("output_tokens", 0) or 0,
+        "cachedTokens": (usage.get("cache_read_input_tokens", 0) or 0)
+        + (usage.get("cache_creation_input_tokens", 0) or 0),
+        "costUsd": data.get("total_cost_usd"),
+    }
+
+
+def _parse_claude_code_output(stdout: str) -> tuple[str, Optional[int], Optional[dict]]:
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError:
-        return stdout.strip(), None
+        return stdout.strip(), None, None
     if not isinstance(data, dict):
-        return stdout.strip(), None
+        return stdout.strip(), None, None
+
+    this_run_usage = _extract_claude_code_this_run_usage(data)
 
     result = data.get("result")
     if isinstance(result, str) and result:
-        return result, data.get("num_turns")
+        return result, data.get("num_turns"), this_run_usage
     if isinstance(result, dict):
         content = result.get("content")
         if isinstance(content, list):
             texts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
             if texts:
-                return "\n".join(texts), data.get("num_turns")
+                return "\n".join(texts), data.get("num_turns"), this_run_usage
 
     # 알려진 스키마 어디에도 안 맞으면 최소한 뭔가는 돌려준다.
-    return json.dumps(data, ensure_ascii=False), data.get("num_turns")
+    return json.dumps(data, ensure_ascii=False), data.get("num_turns"), this_run_usage
 
 
 def run_claude_code_analysis(workspace_path: Path, query: str, timeout_s: int = _DEFAULT_TIMEOUT_S) -> dict:
@@ -113,13 +142,17 @@ def run_claude_code_analysis(workspace_path: Path, query: str, timeout_s: int = 
     if proc.returncode != 0:
         raise CodeAdapterError((proc.stderr or proc.stdout or f"종료 코드 {proc.returncode}")[:2000])
 
-    summary, turns = _parse_claude_code_output(proc.stdout)
+    summary, turns, this_run_usage = _parse_claude_code_output(proc.stdout)
     return {
         "codeAdapter": "CLAUDE_CODE",
         "summary": summary,
         "turns": turns,
         "durationMs": duration_ms,
         "collectedAt": now_iso_kst(),
+        "usage": {
+            "thisRun": this_run_usage,
+            "last7Days": _last_7_days_usage("CLAUDE_CODE"),
+        },
     }
 
 
@@ -139,6 +172,23 @@ def _parse_codex_event_line(line: str) -> Optional[str]:
         return None
     text = item.get("text")
     return text if isinstance(text, str) else None
+
+
+def _parse_codex_turn_usage(line: str) -> Optional[dict]:
+    """turn.completed 이벤트의 usage를 뽑는다(실측 확인 — codex exec ... --json으로 원본
+    NDJSON을 그대로 봤다). 여러 턴이면 마지막 이벤트를 쓴다 — 누적인지 턴별인지 스키마
+    문서가 없어 확실하진 않지만, 어느 쪽이든 마지막 값이 이번 실행을 가장 잘 대표한다."""
+    stripped = line.strip()
+    if not stripped:
+        return None
+    try:
+        event = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, dict) or event.get("type") != "turn.completed":
+        return None
+    usage = event.get("usage")
+    return usage if isinstance(usage, dict) else None
 
 
 def run_codex_analysis(
@@ -180,18 +230,22 @@ def run_codex_analysis(
 
     stdout_lines: list[str] = []
     last_message: Optional[str] = None
+    last_turn_usage: Optional[dict] = None
     turn_count = 0
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
             stdout_lines.append(line)
             text = _parse_codex_event_line(line)
-            if text is None:
+            if text is not None:
+                last_message = text
+                turn_count += 1
+                if on_turn_complete is not None:
+                    on_turn_complete(turn_count)
                 continue
-            last_message = text
-            turn_count += 1
-            if on_turn_complete is not None:
-                on_turn_complete(turn_count)
+            turn_usage = _parse_codex_turn_usage(line)
+            if turn_usage is not None:
+                last_turn_usage = turn_usage
         proc.wait()
     finally:
         timer.cancel()
@@ -205,12 +259,24 @@ def run_codex_analysis(
         raise CodeAdapterError((stderr_output or "".join(stdout_lines) or f"종료 코드 {proc.returncode}")[:2000])
 
     summary = last_message if last_message is not None else "".join(stdout_lines).strip()
+    this_run_usage = None
+    if last_turn_usage is not None:
+        this_run_usage = {
+            "inputTokens": last_turn_usage.get("input_tokens", 0) or 0,
+            "outputTokens": last_turn_usage.get("output_tokens", 0) or 0,
+            "cachedTokens": last_turn_usage.get("cached_input_tokens", 0) or 0,
+            "costUsd": None,  # codex exec은 달러 비용을 안 준다(claude -p와 다름).
+        }
     return {
         "codeAdapter": "CODEX",
         "summary": summary,
         "turns": turn_count if last_message is not None else None,
         "durationMs": duration_ms,
         "collectedAt": now_iso_kst(),
+        "usage": {
+            "thisRun": this_run_usage,
+            "last7Days": _last_7_days_usage("CODEX"),
+        },
     }
 
 

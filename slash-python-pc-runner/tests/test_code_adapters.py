@@ -33,6 +33,12 @@ class FakeCompletedProcess:
 
 
 class TestClaudeCodeAnalysis:
+    @pytest.fixture(autouse=True)
+    def _no_weekly_usage_by_default(self, monkeypatch):
+        # 실제 이 머신의 ~/.claude/projects/를 긁지 않게 기본값을 None으로 고정한다 —
+        # 최근 7일 사용량 자체를 검증하는 시험만 이걸 다시 오버라이드한다.
+        monkeypatch.setattr(code_adapters, "_last_7_days_usage", lambda provider: None)
+
     def test_raises_not_configured_when_cli_missing(self, monkeypatch, tmp_path):
         monkeypatch.setattr(code_adapters, "claude_code_available", lambda: False)
         with pytest.raises(CodeAdapterNotConfiguredError):
@@ -94,6 +100,50 @@ class TestClaudeCodeAnalysis:
 
         assert not isinstance(exc_info.value, CodeAdapterNotConfiguredError)
 
+    def test_includes_this_run_usage_from_cli_response(self, monkeypatch, tmp_path):
+        # claude -p --output-format json은 usage·total_cost_usd를 최상위에 직접 준다
+        # (실측 확인). /code가 사용자의 다른 Claude Code 사용과 같은 구독 레이트리밋
+        # 풀을 나눠 쓰기 때문에, 세션 로그를 다시 훑지 않고 이 응답에서 바로 뽑는다.
+        monkeypatch.setattr(code_adapters, "claude_code_available", lambda: True)
+        payload = (
+            '{"result": "답", "num_turns": 1, "total_cost_usd": 0.05, '
+            '"usage": {"input_tokens": 10, "output_tokens": 20, '
+            '"cache_read_input_tokens": 3, "cache_creation_input_tokens": 7}}'
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompletedProcess(returncode=0, stdout=payload))
+
+        result = run_claude_code_analysis(tmp_path, "설명해줘")
+
+        assert result["usage"]["thisRun"] == {
+            "inputTokens": 10,
+            "outputTokens": 20,
+            "cachedTokens": 10,
+            "costUsd": 0.05,
+        }
+
+    def test_includes_last_7_days_usage_for_matching_provider(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(code_adapters, "claude_code_available", lambda: True)
+        seen_provider = []
+        monkeypatch.setattr(
+            code_adapters,
+            "_last_7_days_usage",
+            lambda provider: seen_provider.append(provider) or {"provider": "CLAUDE_CODE", "totalTokens": 999},
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompletedProcess(returncode=0, stdout='{"result": "답"}'))
+
+        result = run_claude_code_analysis(tmp_path, "설명해줘")
+
+        assert seen_provider == ["CLAUDE_CODE"]
+        assert result["usage"]["last7Days"] == {"provider": "CLAUDE_CODE", "totalTokens": 999}
+
+    def test_this_run_usage_is_none_when_response_lacks_usage_field(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(code_adapters, "claude_code_available", lambda: True)
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeCompletedProcess(returncode=0, stdout="일반 텍스트, JSON 아님"))
+
+        result = run_claude_code_analysis(tmp_path, "설명해줘")
+
+        assert result["usage"]["thisRun"] is None
+
 
 class FakePopen:
     """Popen(stdout=PIPE, stderr=PIPE, text=True) 대역 — 라인 리스트를 스트리밍처럼 순회시킨다."""
@@ -139,6 +189,12 @@ class FakeHangingPopen:
 
 
 class TestCodexAnalysis:
+    @pytest.fixture(autouse=True)
+    def _no_weekly_usage_by_default(self, monkeypatch):
+        # TestClaudeCodeAnalysis의 같은 이름 fixture와 동일한 이유 — 실제 이 머신의
+        # ~/.codex/sessions/를 긁지 않게 기본값을 고정한다.
+        monkeypatch.setattr(code_adapters, "_last_7_days_usage", lambda provider: None)
+
     def test_raises_not_configured_when_cli_missing(self, monkeypatch, tmp_path):
         monkeypatch.setattr(code_adapters, "codex_available", lambda: False)
         with pytest.raises(CodeAdapterNotConfiguredError):
@@ -196,6 +252,52 @@ class TestCodexAnalysis:
             run_codex_analysis(missing_path, "설명해줘")
 
         assert not isinstance(exc_info.value, CodeAdapterNotConfiguredError)
+
+    def test_includes_this_run_usage_from_turn_completed_event(self, monkeypatch, tmp_path):
+        # codex exec ... --json은 turn.completed 이벤트에 usage를 직접 준다(실측 확인).
+        monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
+        stdout_lines = [
+            '{"type": "item.completed", "item": {"type": "agent_message", "text": "답"}}\n',
+            '{"type": "turn.completed", "usage": {"input_tokens": 15541, "cached_input_tokens": 11008, '
+            '"cache_write_input_tokens": 0, "output_tokens": 7, "reasoning_output_tokens": 0}}\n',
+        ]
+        monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakePopen(stdout_lines))
+
+        result = run_codex_analysis(tmp_path, "설명해줘")
+
+        assert result["usage"]["thisRun"] == {
+            "inputTokens": 15541,
+            "outputTokens": 7,
+            "cachedTokens": 11008,
+            "costUsd": None,
+        }
+
+    def test_includes_last_7_days_usage_for_matching_provider(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
+        seen_provider = []
+        monkeypatch.setattr(
+            code_adapters,
+            "_last_7_days_usage",
+            lambda provider: seen_provider.append(provider) or {"provider": "CODEX", "totalTokens": 42},
+        )
+        monkeypatch.setattr(
+            subprocess,
+            "Popen",
+            lambda *a, **k: FakePopen(['{"type": "item.completed", "item": {"type": "agent_message", "text": "답"}}\n']),
+        )
+
+        result = run_codex_analysis(tmp_path, "설명해줘")
+
+        assert seen_provider == ["CODEX"]
+        assert result["usage"]["last7Days"] == {"provider": "CODEX", "totalTokens": 42}
+
+    def test_this_run_usage_is_none_when_no_turn_completed_event(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(code_adapters, "codex_available", lambda: True)
+        monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: FakePopen(["예상 밖 출력\n"]))
+
+        result = run_codex_analysis(tmp_path, "설명해줘")
+
+        assert result["usage"]["thisRun"] is None
 
     def test_calls_on_turn_complete_as_each_turn_finishes(self, monkeypatch, tmp_path):
         monkeypatch.setattr(code_adapters, "codex_available", lambda: True)

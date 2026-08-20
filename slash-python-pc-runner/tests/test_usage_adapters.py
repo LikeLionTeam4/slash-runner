@@ -74,6 +74,30 @@ class TestClaudeCodeAdapter:
         assert result["oldestSessionAt"] == "2026-08-01T10:00:00.000Z"
         assert result["newestSessionAt"] == "2026-08-02T09:00:00.000Z"
 
+    def test_since_excludes_turns_before_cutoff(self, tmp_path):
+        root = tmp_path / "projects"
+        write_jsonl(
+            root / "proj-a" / "session-1.jsonl",
+            [
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-08-01T10:00:00.000Z",
+                    "message": {"usage": {"input_tokens": 100, "output_tokens": 100}},
+                },
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-08-10T10:00:00.000Z",
+                    "message": {"usage": {"input_tokens": 5, "output_tokens": 5}},
+                },
+            ],
+        )
+
+        result = collect_claude_code_usage(root, since="2026-08-05T00:00:00.000Z")
+
+        assert result["totalInputTokens"] == 5
+        assert result["totalOutputTokens"] == 5
+        assert result["oldestSessionAt"] == "2026-08-10T10:00:00.000Z"
+
     def test_skips_corrupted_lines(self, tmp_path):
         root = tmp_path / "projects"
         path = root / "proj-a" / "session-1.jsonl"
@@ -155,6 +179,23 @@ class TestCodexAdapter:
         assert result["totalInputTokens"] == 30
         assert result["totalOutputTokens"] == 20
 
+    def test_since_excludes_sessions_whose_last_activity_is_before_cutoff(self, tmp_path):
+        root = tmp_path / "sessions"
+        write_jsonl(
+            root / "2026" / "08" / "01" / "rollout-old.jsonl",
+            [{"timestamp": "2026-08-01T11:00:00.000Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 100, "output_tokens": 100, "cached_input_tokens": 0, "reasoning_output_tokens": 0}}}}],
+        )
+        write_jsonl(
+            root / "2026" / "08" / "10" / "rollout-recent.jsonl",
+            [{"timestamp": "2026-08-10T11:00:00.000Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 7, "output_tokens": 3, "cached_input_tokens": 0, "reasoning_output_tokens": 0}}}}],
+        )
+
+        result = collect_codex_usage(root, since="2026-08-05T00:00:00.000Z")
+
+        assert result["totalSessions"] == 1
+        assert result["totalInputTokens"] == 7
+        assert result["totalOutputTokens"] == 3
+
     def test_default_root_honors_codex_home_env_var(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "custom-codex-home"))
         assert _codex_root() == tmp_path / "custom-codex-home" / "sessions"
@@ -222,3 +263,34 @@ class TestUsageCache:
 
         assert collect_claude_code_usage(root_a)["totalInputTokens"] == 1
         assert collect_claude_code_usage(root_b)["totalInputTokens"] == 2
+
+
+class TestUsageLast7Days:
+    """CODE_ANALYSIS(/code) 결과에 같이 실어 보낼 최근 7일 사용량 — /code가 사용자 본인의
+    다른 Claude Code·Codex 사용과 같은 구독 레이트리밋 풀을 나눠 쓰기 때문에 필요하다."""
+
+    def test_cutoff_is_roughly_7_days_ago(self):
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = usage_adapters._iso_utc_days_ago(7)
+        parsed = datetime.strptime(cutoff, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+        expected = datetime.now(timezone.utc) - timedelta(days=7)
+
+        assert abs((parsed - expected).total_seconds()) < 5
+
+    def test_passes_cutoff_to_matching_provider_collector(self, monkeypatch):
+        seen = {}
+
+        def fake_collector(since=None):
+            seen["since"] = since
+            return {"provider": "CLAUDE_CODE"}
+
+        monkeypatch.setitem(usage_adapters.COLLECTORS, "CLAUDE_CODE", fake_collector)
+
+        result = usage_adapters.collect_usage_last_7_days("CLAUDE_CODE")
+
+        assert result == {"provider": "CLAUDE_CODE"}
+        assert seen["since"] is not None
+
+    def test_unknown_provider_returns_none(self):
+        assert usage_adapters.collect_usage_last_7_days("UNKNOWN") is None
