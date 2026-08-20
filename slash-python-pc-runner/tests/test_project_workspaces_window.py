@@ -6,16 +6,22 @@ test_folders_window.py와 같은 이유로 webview 창 자체(Api.save/cancel, o
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import slash_pc_runner.project_workspaces_window as project_workspaces_window
 
 
 class TestDisplayPath:
+    # 입력을 fake_home에서 파생시킨다 — Windows에서 Path 문자열 표현이 백슬래시가 되면서
+    # 하드코딩된 "/Users/testuser/..." 리터럴과 안 맞아 CI(windows-latest)에서만 실패했던
+    # 문제(test_folders_window.py와 동일)를 여기서도 피한다.
     def test_shortens_path_under_home(self, monkeypatch):
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/testuser")))
+        fake_home = Path("/Users/testuser")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        target = str(fake_home / "dev" / "slash-runner")
 
-        assert project_workspaces_window.display_path("/Users/testuser/dev/slash-runner") == "~/dev/slash-runner"
+        assert project_workspaces_window.display_path(target) == "~" + os.sep + "dev" + os.sep + "slash-runner"
 
     def test_leaves_non_home_path_untouched(self, monkeypatch):
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/testuser")))

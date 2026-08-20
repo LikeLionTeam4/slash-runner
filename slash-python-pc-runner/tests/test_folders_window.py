@@ -7,6 +7,7 @@ pytest 프로세스 안에서 직접 부를 수 없다 — 그래서 이 시험�
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import slash_pc_runner.folders_window as folders_window
@@ -14,17 +15,25 @@ import slash_pc_runner.folders_window as folders_window
 
 class TestDisplayPath:
     """홈 디렉터리 아래 경로에서 사용자 이름이 그대로 노출되던 문제(fixtures/search-folder가
-    패키징된 앱 안 절대경로로 보이던 것) 재발을 막는다."""
+    패키징된 앱 안 절대경로로 보이던 것) 재발을 막는다.
+
+    입력·기대값을 리터럴 문자열로 하드코딩하지 않고 fake_home에서 파생시킨다 — Windows에서
+    Path("/Users/testuser")의 문자열 표현이 백슬래시가 되면서(os.sep 차이) 하드코딩된
+    "/Users/testuser/..." 형태와 안 맞아 CI(windows-latest)에서만 실패했던 적이 있다.
+    """
 
     def test_shortens_path_under_home(self, monkeypatch):
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/testuser")))
+        fake_home = Path("/Users/testuser")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        target = str(fake_home / "Projects" / "demo")
 
-        assert folders_window.display_path("/Users/testuser/Projects/demo") == "~/Projects/demo"
+        assert folders_window.display_path(target) == "~" + os.sep + "Projects" + os.sep + "demo"
 
     def test_exact_home_directory(self, monkeypatch):
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/testuser")))
+        fake_home = Path("/Users/testuser")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
 
-        assert folders_window.display_path("/Users/testuser") == "~"
+        assert folders_window.display_path(str(fake_home)) == "~"
 
     def test_leaves_non_home_path_untouched(self, monkeypatch):
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/testuser")))
