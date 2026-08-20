@@ -45,7 +45,9 @@
     width: 100%;
     outline: none;
   }
-  input#code:focus { border-color: var(--focus); }
+  /* 테두리 색만으로는 hairline과 차이가 옅어 포커스 여부가 잘 안 보인다는 피드백 — box-shadow
+     글로우를 더해 커서가 이 칸에 있는지 눈으로 바로 구분되게 한다. */
+  input#code:focus { border-color: var(--focus); box-shadow: 0 0 0 3px rgba(93, 143, 255, 0.25); }
   /* 실제 입력과 확실히 구분되도록 두 pseudo-element 다 지정한다(WKWebView 실측 확인 —
      ::placeholder만으로는 폰트 크기·굵기·자간이 입력값과 똑같이 보였다). */
   input#code::placeholder,
@@ -93,6 +95,10 @@
   const input = document.getElementById('code');
   const submitBtn = document.getElementById('submitBtn');
   const errorEl = document.getElementById('error');
+
+  // autofocus만으로는 창이 뜨는 타이밍(특히 macOS에서 앱이 최상위로 활성화되기 전)과
+  // 경합해 실제로는 포커스가 안 잡히는 경우가 있다 — 지연 후 한 번 더 확실히 포커스를 건다.
+  setTimeout(() => input.focus(), 150);
 
   input.addEventListener('input', () => {
     input.value = input.value.replace(/[^0-9]/g, '').slice(0, 6);
