@@ -102,8 +102,12 @@ jobs:
         shell: pwsh
         run: |
           $env:SSL_CERT_FILE = $null
-          & "dist\Slash\Slash.exe" --ssl-selfcheck
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # windowed(비콘솔) exe를 `&`로 바로 실행하면 pwsh가 $LASTEXITCODE를 못 잡을 때가
+          # 있다 — 바로 위 크래시 테스트와 같은 Start-Process -PassThru 방식을 쓴다.
+          $proc = Start-Process -FilePath "dist\Slash\Slash.exe" -ArgumentList "--ssl-selfcheck" `
+            -Wait -PassThru -RedirectStandardOutput "ssl-selfcheck-out.txt" -RedirectStandardError "ssl-selfcheck-err.txt"
+          Get-Content "ssl-selfcheck-out.txt", "ssl-selfcheck-err.txt" -ErrorAction SilentlyContinue
+          if ($proc.ExitCode -ne 0) { exit 1 }
       - run: Compress-Archive -Path dist/Slash -DestinationPath Slash-Windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
