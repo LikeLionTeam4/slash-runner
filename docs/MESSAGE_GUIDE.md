@@ -247,9 +247,9 @@ REST로 보낸 명령이 `LOCAL_AGENT` 경로(`SYSTEM_STATUS`, `FILE_SEARCH`)면
 이 PC 작업 실행기가 실제로 낼 수 있는 `reasonCode`/`error.code` 전체 목록은 프로토콜 문서와 동일한
 9종(`DEVICE_BUSY, TASK_TYPE_NOT_SUPPORTED, INVALID_PARAMETERS, SEARCH_FOLDER_NOT_FOUND,
 FILE_NOT_FOUND, WORKSPACE_NOT_FOUND, CODE_AGENT_NOT_CONFIGURED, TASK_EXPIRED, POLICY_DENIED`)이며,
-이 PC 작업 실행기는 `SYSTEM_STATUS`/`FILE_SEARCH`/`FILE_OPEN`/`AI_AGENT_USAGE`/`CODE_ANALYSIS`
-다섯 가지를 지원하므로 실제로는 이 중 일부만 발생한다(자세한 동작은 README.md "3) 현재 처리하는
-작업" 참고).
+이 PC 작업 실행기는 `SYSTEM_STATUS`/`FILE_SEARCH`/`FILE_OPEN`/`AI_AGENT_USAGE`/`CODE_ANALYSIS`/
+`TEXT_SUMMARY` 여섯 가지를 지원하므로 실제로는 이 중 일부만 발생한다(자세한 동작은 README.md
+"3) 현재 처리하는 작업" 참고).
 
 ## 4. 페어링 — PC 작업 실행기가 처음 연결될 때
 

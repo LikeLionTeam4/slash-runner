@@ -26,6 +26,10 @@ from .code_adapters import (
     RUNNERS as CODE_ADAPTER_RUNNERS,
     ProjectWorkspaceConfig,
 )
+from .summary_adapters import (
+    AVAILABILITY_CHECKS as SUMMARY_ADAPTER_AVAILABILITY_CHECKS,
+    RUNNERS as SUMMARY_ADAPTER_RUNNERS,
+)
 from ._build_info import get_agent_version
 from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pair
 from .file_actions import reveal_in_file_manager
@@ -43,7 +47,14 @@ from .protocol import (
 from .system_status import collect_system_status
 from .usage_adapters import COLLECTORS
 
-SUPPORTED_TASK_TYPES: tuple[str, ...] = ("FILE_SEARCH", "FILE_OPEN", "SYSTEM_STATUS", "AI_AGENT_USAGE", "CODE_ANALYSIS")
+SUPPORTED_TASK_TYPES: tuple[str, ...] = (
+    "FILE_SEARCH",
+    "FILE_OPEN",
+    "SYSTEM_STATUS",
+    "AI_AGENT_USAGE",
+    "CODE_ANALYSIS",
+    "TEXT_SUMMARY",
+)
 
 # RESULT_ACK 수신 후 재수신 대비 보관 기간
 PROCESSED_TASK_RETENTION_S = 60 * 60
@@ -53,11 +64,13 @@ PROCESSED_TASK_RETENTION_S = 60 * 60
 PROGRESS_TICK_INTERVAL_S = 15.0
 
 # slash-api의 tasks.result 컬럼에 CHECK(octet_length(result::text) <= 65536) 제약이 걸려
-# 있다(V004/V006 마이그레이션 확인) — CODE_ANALYSIS의 summary는 CLI 출력을 그대로 담으므로
-# 길이 제한이 없으면 이 상한을 넘겨 서버 저장 단계에서 실패할 수 있다. 다른 필드·JSON
-# 구조 자체의 오버헤드, summary 안의 JSON 이스케이프 확장분을 감안해 여유를 두고 자른다.
-CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT = 65536
-CODE_ANALYSIS_TRUNCATION_MARKER = "\n\n...(결과가 너무 길어 일부가 잘렸습니다)"
+# 있다(V004/V006 마이그레이션 확인) — CODE_ANALYSIS·TEXT_SUMMARY 둘 다 summary 필드에 CLI
+# 출력을 그대로 담으므로 길이 제한이 없으면 이 상한을 넘겨 서버 저장 단계에서 실패할 수
+# 있다. 다른 필드·JSON 구조 자체의 오버헤드, summary 안의 JSON 이스케이프 확장분을 감안해
+# 여유를 두고 자른다. (TEXT_SUMMARY는 3문장 이내로 짧게 끝나도록 프롬프트로 유도하지만,
+# 프롬프트를 CLI가 항상 따른다는 보장은 없어 방어적으로 CODE_ANALYSIS와 같은 안전장치를 쓴다.)
+RESULT_JSON_BYTE_LIMIT = 65536
+RESULT_TRUNCATION_MARKER = "\n\n...(결과가 너무 길어 일부가 잘렸습니다)"
 
 
 def _iso_to_epoch(iso_str: str) -> float:
@@ -81,7 +94,9 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return ""
 
 
-def _truncate_code_analysis_result(result: dict) -> dict:
+def _truncate_summary_field(result: dict) -> dict:
+    """result.summary가 서버 저장 상한을 넘으면 잘라 truncated 표시를 남긴다.
+    CODE_ANALYSIS·TEXT_SUMMARY 둘 다 결과를 summary 필드에 담아 이 함수 하나를 같이 쓴다."""
     summary = result.get("summary")
     if not isinstance(summary, str):
         return result
@@ -89,7 +104,7 @@ def _truncate_code_analysis_result(result: dict) -> dict:
     def encoded_size(candidate: dict) -> int:
         return len(json.dumps(candidate, ensure_ascii=False).encode("utf-8"))
 
-    if encoded_size(result) <= CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT:
+    if encoded_size(result) <= RESULT_JSON_BYTE_LIMIT:
         return result
 
     # summary만 줄여가며 전체 JSON 크기가 상한 이하가 될 때까지 반복한다 — JSON 이스케이프로
@@ -97,9 +112,9 @@ def _truncate_code_analysis_result(result: dict) -> dict:
     budget = len(summary.encode("utf-8"))
     while True:
         budget = int(budget * 0.9)
-        candidate_summary = _truncate_utf8(summary, budget) + CODE_ANALYSIS_TRUNCATION_MARKER
+        candidate_summary = _truncate_utf8(summary, budget) + RESULT_TRUNCATION_MARKER
         candidate = {**result, "summary": candidate_summary, "truncated": True}
-        if budget <= 0 or encoded_size(candidate) <= CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT:
+        if budget <= 0 or encoded_size(candidate) <= RESULT_JSON_BYTE_LIMIT:
             return candidate
 
 
@@ -388,11 +403,18 @@ class ContractPcRunner:
             )
             for workspace in self._options.project_workspaces
         ]
+        # slash-api는 아직 TEXT_SUMMARY를 LLM_SERVICE로만 라우팅해 이 값을 안 쓴다(RUN-01) —
+        # CODE_ANALYSIS의 projectWorkspaces가 그랬듯, 라우팅이 붙기 전에 능력치부터 미리
+        # 보고해 둔다.
+        available_summary_adapters = [
+            name for name, check in SUMMARY_ADAPTER_AVAILABILITY_CHECKS.items() if check()
+        ]
         return dict(
             maxConcurrentTasks=1,
             supportedTaskTypes=list(SUPPORTED_TASK_TYPES),
             searchFolders=search_folders,
             projectWorkspaces=project_workspaces,
+            availableSummaryAdapters=available_summary_adapters,
         )
 
     def _send_heartbeat(self, socket) -> None:
@@ -633,6 +655,15 @@ class ContractPcRunner:
             code_adapter = self._resolve_code_adapter(workspace, message["parameters"].get("codeAdapter"))
             if code_adapter is None:
                 return "CODE_AGENT_NOT_CONFIGURED"
+        if message["taskType"] == "TEXT_SUMMARY":
+            text = message["parameters"].get("text")
+            if not isinstance(text, str) or not text.strip():
+                return "INVALID_PARAMETERS"
+            if self._resolve_summary_adapter() is None:
+                # 별도 reasonCode를 새로 만들지 않는다 — "로컬 AI 도구가 설정되어 있지 않음"은
+                # CODE_ANALYSIS와 의미가 같고, 이 값은 README에 문서화된 slash-api 소유
+                # 프로토콜 계약이라 이 저장소가 임의로 값을 추가할 수 없다.
+                return "CODE_AGENT_NOT_CONFIGURED"
         return None
 
     def _find_project_workspace(self, workspace_id: Optional[str]) -> Optional[ProjectWorkspaceConfig]:
@@ -647,6 +678,15 @@ class ContractPcRunner:
         if check is None or not check():
             return None
         return candidate
+
+    def _resolve_summary_adapter(self) -> Optional[str]:
+        # CODE_ANALYSIS와 달리 프로젝트 워크스페이스 단위가 아니라 PC 전체 기준이다 — 파일
+        # 접근이 필요 없는 작업이라 "어느 폴더에서 쓸 수 있는지" 개념 자체가 없다. 계약에
+        # 클라이언트가 어댑터를 지정하는 파라미터가 아직 없어 자동 선택만 지원한다.
+        for name, check in SUMMARY_ADAPTER_AVAILABILITY_CHECKS.items():
+            if check():
+                return name
+        return None
 
     def _execute_task(self, socket, message: dict) -> dict:
         try:
@@ -679,7 +719,12 @@ class ContractPcRunner:
                 if code_adapter == "CODEX":
                     extra_kwargs["on_turn_complete"] = lambda turn: self._send_turn_progress(socket, message, turn)
                 result = CODE_ADAPTER_RUNNERS[code_adapter](Path(workspace.root_path), query, **extra_kwargs)
-                return {"ok": True, "result": _truncate_code_analysis_result(result)}
+                return {"ok": True, "result": _truncate_summary_field(result)}
+            if message["taskType"] == "TEXT_SUMMARY":
+                text = str(message["parameters"].get("text", ""))
+                summary_adapter = self._resolve_summary_adapter()
+                result = SUMMARY_ADAPTER_RUNNERS[summary_adapter](text)
+                return {"ok": True, "result": _truncate_summary_field(result)}
             return {
                 "ok": False,
                 "error": {"code": "TASK_TYPE_NOT_SUPPORTED", "message": "unsupported task type", "retryable": False},
