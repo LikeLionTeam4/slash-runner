@@ -91,7 +91,7 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "Slash",
         "CFBundleDisplayName": "Slash",
-        "CFBundleShortVersionString": "0.5.0",
+        "CFBundleShortVersionString": "0.5.1",
         # 메뉴바 전용 앱 — Dock 아이콘/앱 전환기에 안 뜬다(Electron agent-app의
         # LSUIElement와 동일 설정). 이게 걸리면 tray_app.py/folders_window.py의
         # 런타임 NSApplicationActivationPolicyAccessory 호출은 사실상 불필요해지지만,
