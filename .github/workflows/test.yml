@@ -61,6 +61,11 @@ jobs:
             echo "실패 — 실행 후 크래시했거나 즉시 종료됨"
             exit 1
           fi
+      # 얼린 실행 파일에 CA 인증서 번들이 실제로 딸려 왔는지 확인 — 개발 모드는 시스템
+      # Python이 OS 인증서 저장소를 찾아 문제가 없어서 이 결함이 그동안 안 걸렸다
+      # (resources.configure_ssl_certificates() 참고).
+      - name: 스모크 테스트 — 인증서 번들로 HTTPS 접속 되는지 확인
+        run: env -u SSL_CERT_FILE dist/Slash.app/Contents/MacOS/Slash --ssl-selfcheck
       # zip -r 대신 ditto를 쓴다 — .app 번들의 리소스 포크·확장 속성을 보존하며 압축하는
       # macOS 표준 방식이다(Apple 공식 배포 가이드에서 권장하는 방법).
       - run: ditto -c -k --sequesterRsrc --keepParent dist/Slash.app Slash-macOS-arm64.zip
@@ -93,6 +98,16 @@ jobs:
             Write-Host "정상 — 5초 뒤에도 살아있음"
             Stop-Process -Id $proc.Id -Force
           }
+      - name: 스모크 테스트 — 인증서 번들로 HTTPS 접속 되는지 확인
+        shell: pwsh
+        run: |
+          $env:SSL_CERT_FILE = $null
+          # windowed(비콘솔) exe를 `&`로 바로 실행하면 pwsh가 $LASTEXITCODE를 못 잡을 때가
+          # 있다 — 바로 위 크래시 테스트와 같은 Start-Process -PassThru 방식을 쓴다.
+          $proc = Start-Process -FilePath "dist\Slash\Slash.exe" -ArgumentList "--ssl-selfcheck" `
+            -Wait -PassThru -RedirectStandardOutput "ssl-selfcheck-out.txt" -RedirectStandardError "ssl-selfcheck-err.txt"
+          Get-Content "ssl-selfcheck-out.txt", "ssl-selfcheck-err.txt" -ErrorAction SilentlyContinue
+          if ($proc.ExitCode -ne 0) { exit 1 }
       - run: Compress-Archive -Path dist/Slash -DestinationPath Slash-Windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:

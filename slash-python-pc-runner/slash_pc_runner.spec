@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import certifi
+
 block_cipher = None
 project_root = Path(SPECPATH)
 repo_root = project_root.parent
@@ -35,6 +37,11 @@ datas = [
     (str(repo_root / "fixtures" / "search-folder"), "fixtures/search-folder"),
     (str(package_dir / "_build_sha.txt"), "."),
     (str(package_dir / "_build_date.txt"), "."),
+    # certifi의 cacert.pem은 데이터 파일이라 PyInstaller가 .py처럼 자동으로 못 찾는다 —
+    # 없으면 urllib·websockets의 기본 ssl 컨텍스트가 인증서 검증에 실패한다(resources.py
+    # configure_ssl_certificates() 참고). "certifi" 목적지에 둬야 certifi.where()가
+    # 얼린 상태에서도 os.path.dirname(__file__) 기준으로 같은 상대 위치를 찾는다.
+    (certifi.where(), "certifi"),
 ]
 
 a = Analysis(
