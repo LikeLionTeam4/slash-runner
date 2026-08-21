@@ -123,6 +123,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # 워크플로 전역 defaults.working-directory(slash-python-pc-runner)를 이 job에서만
+    # 되돌린다 — 이 job은 소스를 체크아웃하지 않고 내려받은 아티팩트만 다루므로 그
+    # 디렉터리가 애초에 존재하지 않는다(전역 기본값 그대로면 "No such file or directory"로
+    # bash 실행 자체가 실패한다 — v0.5.2-pre 태그 릴리스에서 실제로 이렇게 실패해 발견함).
+    defaults:
+      run:
+        working-directory: .
     steps:
       - uses: actions/download-artifact@v4
       # 배포 파일명에 버전을 붙인다 — 여러 버전을 내려받아도 파일명만 보고 구분할 수 있게.
