@@ -110,10 +110,17 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
+      # 배포 파일명에 버전을 붙인다 — 여러 버전을 내려받아도 파일명만 보고 구분할 수 있게.
+      # package-macos/package-windows job 자체의 zip 이름은 안 건드린다(PR·dev push에서도
+      # 도는 job이라 태그 없는 ref에서는 github.ref_name이 브랜치명·PR 병합 ref라 파일명에
+      # 쓰기 부적절 — release job은 태그 push에서만 돌아 여기서는 안전하다).
+      - run: |
+          mv Slash-macOS-arm64/Slash-macOS-arm64.zip Slash-macOS-arm64/Slash-macOS-arm64-${{ github.ref_name }}.zip
+          mv Slash-Windows-x64/Slash-Windows-x64.zip Slash-Windows-x64/Slash-Windows-x64-${{ github.ref_name }}.zip
       - uses: softprops/action-gh-release@v2
         with:
           # v0.3.0-pre처럼 태그 이름에 pre가 들어가면 프리릴리스로 표시한다.
           prerelease: ${{ contains(github.ref_name, 'pre') }}
           files: |
-            Slash-macOS-arm64/Slash-macOS-arm64.zip
-            Slash-Windows-x64/Slash-Windows-x64.zip
+            Slash-macOS-arm64/Slash-macOS-arm64-${{ github.ref_name }}.zip
+            Slash-Windows-x64/Slash-Windows-x64-${{ github.ref_name }}.zip
