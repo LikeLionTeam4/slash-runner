@@ -175,18 +175,18 @@ def test_progress_message_only_attached_for_code_analysis():
 class TestResultTruncation:
     def test_leaves_small_result_untouched(self):
         result = {"codeAdapter": "CLAUDE_CODE", "summary": "짧은 요약", "turns": 1, "durationMs": 10, "collectedAt": "now"}
-        assert agent_module._truncate_code_analysis_result(result) == result
+        assert agent_module._truncate_summary_field(result) == result
 
     def test_truncates_oversized_summary_within_byte_limit(self):
         huge_summary = "가나다라마바사아자차카" * 20000  # 각 문자 3바이트 — 넉넉히 상한 초과
         result = {"codeAdapter": "CLAUDE_CODE", "summary": huge_summary, "turns": 1, "durationMs": 10, "collectedAt": "now"}
 
-        truncated = agent_module._truncate_code_analysis_result(result)
+        truncated = agent_module._truncate_summary_field(result)
 
         encoded_size = len(json.dumps(truncated, ensure_ascii=False).encode("utf-8"))
-        assert encoded_size <= agent_module.CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT
+        assert encoded_size <= agent_module.RESULT_JSON_BYTE_LIMIT
         assert truncated["truncated"] is True
-        assert truncated["summary"].endswith(agent_module.CODE_ANALYSIS_TRUNCATION_MARKER)
+        assert truncated["summary"].endswith(agent_module.RESULT_TRUNCATION_MARKER)
         # 나머지 필드는 그대로 보존된다.
         assert truncated["turns"] == 1
         assert truncated["codeAdapter"] == "CLAUDE_CODE"
@@ -219,7 +219,7 @@ def test_oversized_result_is_truncated_before_result_sent(server, tmp_path, monk
         assert result["status"] == "SUCCEEDED"
         assert result["result"]["truncated"] is True
         encoded_size = len(json.dumps(result["result"], ensure_ascii=False).encode("utf-8"))
-        assert encoded_size <= agent_module.CODE_ANALYSIS_RESULT_JSON_BYTE_LIMIT
+        assert encoded_size <= agent_module.RESULT_JSON_BYTE_LIMIT
     finally:
         agent.stop()
 

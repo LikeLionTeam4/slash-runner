@@ -267,7 +267,7 @@ TASK_EXPIRED, POLICY_DENIED`
 
 ### 3) 현재 처리하는 작업
 
-PC 작업 실행기는 다섯 가지 `taskType`을 처리하며, 그 외는 `TASK_TYPE_NOT_SUPPORTED`로
+PC 작업 실행기는 여섯 가지 `taskType`을 처리하며, 그 외는 `TASK_TYPE_NOT_SUPPORTED`로
 거부합니다.
 
 - **`SYSTEM_STATUS`**: 실행 중인 PC의 CPU/메모리(`psutil`)·디스크 사용량을 조회하여
@@ -297,6 +297,17 @@ PC 작업 실행기는 다섯 가지 `taskType`을 처리하며, 그 외는 `TAS
   `{codeAdapter, summary, turns, durationMs, collectedAt}`를 반환하며, 결과가 서버 저장
   상한(64KB)을 넘으면 잘라서 보냅니다. 등록되지 않은 워크스페이스는 `WORKSPACE_NOT_FOUND`,
   CLI가 설치되어 있지 않으면 `CODE_AGENT_NOT_CONFIGURED`로 거부합니다.
+- **`TEXT_SUMMARY`**: `parameters.text`로 받은 텍스트를 로컬에 설치된 `claude`/`codex`
+  CLI로 3문장 이내 요약합니다. `CODE_ANALYSIS`와 달리 등록된 프로젝트 폴더가 필요 없어
+  매 실행마다 빈 임시 디렉터리에서 실행하고, 텍스트는 CLI 인자가 아니라 표준입력으로
+  전달합니다. 파일 쓰기·Shell 실행·웹 검색·MCP 도구를 전부 차단합니다.
+  `{summaryAdapter, summary, durationMs, collectedAt}`를 반환하며, 결과가 서버 저장
+  상한(64KB)을 넘으면 `CODE_ANALYSIS`와 같은 방식으로 잘라서 보냅니다. **현재
+  slash-api는 이 taskType을 아직 `LLM_SERVICE`로만 라우팅해(`ProcessingRoute` 고정)
+  Runner로 TASK가 실제로 오지는 않습니다** — 클라우드 LLM 제거 계획(`slash-docs#3`)의
+  라우팅 작업이 붙기 전까지는 `READY`의 `availableSummaryAdapters` 보고와 배선만
+  미리 준비된 상태입니다. 로컬에 CLI가 하나도 없으면 `CODE_AGENT_NOT_CONFIGURED`로
+  거부합니다.
 
 ### 4) 안정성 관련 동작
 
