@@ -42,6 +42,21 @@ def main() -> None:
         pairing_main()
         return
 
+    if len(sys.argv) >= 2 and sys.argv[1] == "--ssl-selfcheck":
+        # 얼린 실행 파일에 인증서 번들이 실제로 딸려 왔는지 CI/로컬에서 GUI 없이 확인하는
+        # 자리. urllib 기본 컨텍스트가 인증서를 못 찾으면(패키징 결함) 예외로 즉시 드러난다
+        # — resources.configure_ssl_certificates()가 없던 시절 실제로 겪은 결함이다.
+        import urllib.request
+
+        url = sys.argv[2] if len(sys.argv) >= 3 else "https://api.dev.sbsh.cloud/api/v1/health/dependencies"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as res:
+                print(f"SSL_SELFCHECK_OK status={res.status}")
+        except Exception as e:
+            print(f"SSL_SELFCHECK_FAIL {e}")
+            sys.exit(1)
+        return
+
     from .tray_app import main as tray_main
 
     tray_main()

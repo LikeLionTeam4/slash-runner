@@ -11,9 +11,23 @@ import os
 import sys
 from pathlib import Path
 
+import certifi
+
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
+
+
+def configure_ssl_certificates() -> None:
+    """`urllib`·`websockets` 등이 기본으로 쓰는 `ssl.create_default_context()`가 인증서
+    체인을 검증할 수 있게 한다.
+
+    개발 모드는 시스템 Python(Homebrew 등)이 OS 인증서 저장소를 찾아 문제가 없지만,
+    PyInstaller로 얼린 실행 파일은 완전히 격리된 Python이라 그 경로에 의존할 수 없고
+    인증서 자체가 번들에 없다 — HTTPS/WSS 요청이 전부 `CERTIFICATE_VERIFY_FAILED`로
+    실패한다. `SSL_CERT_FILE`을 지정하면 OpenSSL이 기본 경로 대신 이 파일을 쓴다.
+    이미 설정돼 있으면(예: 사내 프록시 CA) 덮어쓰지 않는다."""
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
 
 def config_dir() -> Path:
