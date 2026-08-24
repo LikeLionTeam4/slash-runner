@@ -81,6 +81,16 @@ pyinstaller slash_pc_runner.spec
   (또는 universal2 Python)이 필요하며, 코드 자체는 이미 호환되므로 재빌드만 하면 됩니다.
 - Apple Developer ID 서명 및 공증(notarization)은 아직 진행하지 않았습니다.
 
+**GitHub Release로 받은 경우**: 브라우저로 내려받은 zip은 macOS가 격리
+속성(`com.apple.quarantine`)을 자동으로 붙여, 압축을 풀어도 Gatekeeper가
+"손상되어 열 수 없음"으로 막습니다. 압축 해제 후 아래 명령으로 지워야
+실행됩니다(다운로드 폴더 기준 경로 — 다른 위치에 풀었다면 그 경로로 바꿔서
+실행).
+
+```bash
+xattr -cr ~/Downloads/Slash.app
+```
+
 ### Windows
 
 ```powershell
