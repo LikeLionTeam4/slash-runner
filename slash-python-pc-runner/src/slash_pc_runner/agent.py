@@ -29,6 +29,7 @@ from .code_adapters import (
 from .summary_adapters import (
     AVAILABILITY_CHECKS as SUMMARY_ADAPTER_AVAILABILITY_CHECKS,
     RUNNERS as SUMMARY_ADAPTER_RUNNERS,
+    SUMMARY_MAX_INPUT_CHARS,
 )
 from ._build_info import get_agent_version
 from .crypto import AgentKeyPair, generate_agent_key_pair, restore_agent_key_pair
@@ -658,6 +659,12 @@ class ContractPcRunner:
         if message["taskType"] == "TEXT_SUMMARY":
             text = message["parameters"].get("text")
             if not isinstance(text, str) or not text.strip():
+                return "INVALID_PARAMETERS"
+            # 상한 초과를 여기서 먼저 걸러야 INVALID_PARAMETERS로 나간다 — 이 검사가 없으면
+            # summary_adapters._validate_input_length()가 실행 단계에서야 걸려
+            # _execute_task의 공용 except가 POLICY_DENIED로 잘못 분류한다(입력값 문제인데
+            # 권한/정책 문제로 보임, 실측 확인된 오분류).
+            if len(text) > SUMMARY_MAX_INPUT_CHARS:
                 return "INVALID_PARAMETERS"
             if self._resolve_summary_adapter() is None:
                 # 별도 reasonCode를 새로 만들지 않는다 — "로컬 AI 도구가 설정되어 있지 않음"은

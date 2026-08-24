@@ -79,6 +79,23 @@ def test_rejects_missing_text_parameter(server, monkeypatch):
         agent.stop()
 
 
+def test_rejects_text_over_max_length_at_ack(server, monkeypatch):
+    # ACK 단계에서 걸러야 INVALID_PARAMETERS로 나간다 — 실행 단계까지 넘어가면
+    # summary_adapters._validate_input_length()가 던지는 예외를 _execute_task의 공용
+    # except가 POLICY_DENIED로 잘못 분류한다(실측 확인된 오분류, #44 관련 조사에서 발견).
+    monkeypatch.setitem(agent_module.SUMMARY_ADAPTER_AVAILABILITY_CHECKS, "CLAUDE_CODE", lambda: True)
+
+    agent = start_agent(server)
+    try:
+        oversized_text = "가" * (agent_module.SUMMARY_MAX_INPUT_CHARS + 1)
+        server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "TEXT_SUMMARY", {"text": oversized_text})
+        ack = server.wait_for_message("ACK")
+        assert ack["accepted"] is False
+        assert ack["reasonCode"] == "INVALID_PARAMETERS"
+    finally:
+        agent.stop()
+
+
 def test_rejects_when_no_summary_adapter_configured(server, monkeypatch):
     monkeypatch.setitem(agent_module.SUMMARY_ADAPTER_AVAILABILITY_CHECKS, "CLAUDE_CODE", lambda: False)
     monkeypatch.setitem(agent_module.SUMMARY_ADAPTER_AVAILABILITY_CHECKS, "CODEX", lambda: False)
