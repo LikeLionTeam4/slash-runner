@@ -8,6 +8,7 @@ PyInstaller onefile 빌드는 실행 시점에 번들된 데이터 파일을 임
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,6 +29,46 @@ def configure_ssl_certificates() -> None:
     실패한다. `SSL_CERT_FILE`을 지정하면 OpenSSL이 기본 경로 대신 이 파일을 쓴다.
     이미 설정돼 있으면(예: 사내 프록시 CA) 덮어쓰지 않는다."""
     os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
+
+def resolve_cli_path() -> None:
+    """`claude`/`codex` CLI가 설치돼 있어도 GUI로 실행된 얼린 앱이 못 찾는 문제를 고친다
+    (`slash-runner#44`).
+
+    macOS에서 Finder로 실행한 GUI 프로세스는 `launchd`의 기본 PATH
+    (`/usr/bin:/bin:/usr/sbin:/sbin`)만 물려받고, 터미널 셸(`~/.zshrc` 등)이 추가하는
+    Homebrew 등의 경로는 없다 — 실제로 실행 중인 `Slash.app`의 PATH를 `ps eww`로 직접
+    조회해 확인된 사실이다. `code_adapters.py`의 `claude_code_available()`/
+    `codex_available()`과 그 뒤의 `subprocess` 호출은 전부 `shutil.which`·`os.environ`
+    기본 동작에 의존하므로, 여기서 프로세스 시작 시 한 번만 PATH를 보강해 두면 호출부를
+    바꿀 필요가 없다.
+
+    로그인 셸을 1회 실행해 그 PATH를 뒤에 이어 붙인다. 개발 모드(터미널에서 실행)는 이미
+    올바른 PATH를 상속하므로 사실상 아무것도 안 바뀐다. 셸 조회가 실패해도(Windows는 이
+    문제 자체가 없어 애초에 시도하지 않음, 그 외 실패는 타임아웃·예외 전부 포함) 기존
+    PATH를 그대로 둔다 — 상황을 악화시키지 않는다."""
+    if sys.platform == "win32":
+        return
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    try:
+        result = subprocess.run(
+            [shell, "-l", "-c", 'echo -n "$PATH"'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return
+    shell_path = result.stdout.strip()
+    if not shell_path:
+        return
+
+    current = os.environ.get("PATH", "")
+    existing = set(current.split(os.pathsep)) if current else set()
+    additions = [p for p in shell_path.split(os.pathsep) if p and p not in existing]
+    if not additions:
+        return
+    os.environ["PATH"] = os.pathsep.join([current, *additions]) if current else os.pathsep.join(additions)
 
 
 def config_dir() -> Path:

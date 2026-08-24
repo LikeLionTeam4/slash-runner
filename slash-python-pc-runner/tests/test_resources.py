@@ -6,6 +6,7 @@ macOS 폴더명을 slash-pc-runner-py에서 slash로 바꾸면서, 기존 사용
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import slash_pc_runner.resources as resources
@@ -23,6 +24,59 @@ class TestConfigDir:
         monkeypatch.setenv("APPDATA", str(Path("C:/Users/testuser/AppData/Roaming")))
 
         assert resources.config_dir() == Path("C:/Users/testuser/AppData/Roaming") / "slash-pc-runner-py"
+
+
+class FakeCompletedProcess:
+    def __init__(self, stdout=""):
+        self.stdout = stdout
+
+
+class TestResolveCliPath:
+    def test_noop_on_windows(self, monkeypatch):
+        monkeypatch.setattr(resources.sys, "platform", "win32")
+        called = []
+        monkeypatch.setattr(resources.subprocess, "run", lambda *a, **k: called.append(1))
+
+        resources.resolve_cli_path()
+
+        assert called == []
+
+    def test_appends_shell_path_entries_not_already_present(self, monkeypatch):
+        monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        monkeypatch.setattr(
+            resources.subprocess,
+            "run",
+            lambda *a, **k: FakeCompletedProcess(stdout="/usr/bin:/opt/homebrew/bin"),
+        )
+
+        resources.resolve_cli_path()
+
+        assert os.environ["PATH"] == "/usr/bin:/bin:/opt/homebrew/bin"
+
+    def test_leaves_path_untouched_when_shell_lookup_fails(self, monkeypatch):
+        monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+
+        def _raise(*a, **k):
+            raise TimeoutError("no shell")
+
+        monkeypatch.setattr(resources.subprocess, "run", _raise)
+
+        resources.resolve_cli_path()
+
+        assert os.environ["PATH"] == "/usr/bin:/bin"
+
+    def test_leaves_path_untouched_when_no_new_entries(self, monkeypatch):
+        monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        monkeypatch.setattr(
+            resources.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout="/usr/bin:/bin")
+        )
+
+        resources.resolve_cli_path()
+
+        assert os.environ["PATH"] == "/usr/bin:/bin"
 
 
 class TestMigrateLegacyConfigDir:

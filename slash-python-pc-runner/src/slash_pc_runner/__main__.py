@@ -15,9 +15,12 @@ def main() -> None:
     # 다른 어떤 분기보다 먼저 — single_instance.py의 락 파일 생성을 포함해 config_dir()를
     # 쓰는 모든 코드보다 앞서야 마이그레이션이 "새 폴더가 아직 없다" 조건을 안전하게 본다
     # (resources.migrate_legacy_config_dir() 주석 참고).
-    from .resources import migrate_legacy_config_dir
+    from .resources import migrate_legacy_config_dir, resolve_cli_path
 
     migrate_legacy_config_dir()
+    # claude/codex CLI를 실제로 실행하는 분기(트레이/에이전트)보다 먼저 — GUI로 실행된
+    # 얼린 앱은 launchd 기본 PATH만 가져 Homebrew 등에 설치된 CLI를 못 찾는다(#44).
+    resolve_cli_path()
 
     if len(sys.argv) >= 3 and sys.argv[1] == "--folders-window":
         from .folders_window import run
