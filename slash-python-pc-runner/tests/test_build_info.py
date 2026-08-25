@@ -50,4 +50,4 @@ def test_get_agent_version_combines_all_three(tmp_path, monkeypatch):
     monkeypatch.setattr(_build_info, "get_build_sha", lambda: "abcdef1234567")
     monkeypatch.setattr(_build_info, "get_build_date", lambda: "20260819")
 
-    assert _build_info.get_agent_version() == "slash-pc-runner-py/0.5.5+abcdef1.20260819"
+    assert _build_info.get_agent_version() == "slash-pc-runner-py/0.5.6+abcdef1.20260819"
