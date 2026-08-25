@@ -129,6 +129,45 @@ class TestRefreshLoopSurvivesExceptions:
         assert calls == []
 
 
+class TestLoadConfigApiBaseUrlDefault:
+    """config.json도 환경변수도 없을 때의 apiBaseUrl 기본값 — 얼린 앱(배포판)이 로컬
+    mock-api 전용 주소(localhost:4000)로 접속을 시도하다 원인 불명의 "연결 거부"만 보던
+    문제(Windows 실기기에서 재현)를 고친 부분이다. 개발 모드는 `/test/login` 자동 페어링이
+    로컬 mock-api를 전제로 하므로 기존 기본값을 그대로 유지해야 한다."""
+
+    def _clear_env(self, monkeypatch):
+        for name in (
+            "SLASH_PC_RUNNER_API_BASE_URL",
+            "SLASH_PC_RUNNER_PAIRING_CODE",
+            "SLASH_PC_RUNNER_DEVICE_NAME",
+            "SLASH_PC_RUNNER_HEARTBEAT_INTERVAL_S",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_frozen_defaults_to_dev_server(self, tmp_path, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setattr(tray_app, "CONFIG_PATH", tmp_path / "config.json")
+        monkeypatch.setattr(tray_app, "is_frozen", lambda: True)
+
+        assert tray_app._load_config()["apiBaseUrl"] == "https://api.dev.sbsh.cloud"
+
+    def test_dev_mode_defaults_to_local_mock_api(self, tmp_path, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setattr(tray_app, "CONFIG_PATH", tmp_path / "config.json")
+        monkeypatch.setattr(tray_app, "is_frozen", lambda: False)
+
+        assert tray_app._load_config()["apiBaseUrl"] == "http://localhost:4000"
+
+    def test_config_file_value_wins_regardless_of_frozen(self, tmp_path, monkeypatch):
+        self._clear_env(monkeypatch)
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"apiBaseUrl": "https://api.example.com"}), encoding="utf-8")
+        monkeypatch.setattr(tray_app, "CONFIG_PATH", path)
+        monkeypatch.setattr(tray_app, "is_frozen", lambda: True)
+
+        assert tray_app._load_config()["apiBaseUrl"] == "https://api.example.com"
+
+
 class TestLoadProjectWorkspaces:
     """CODE_ANALYSIS가 실제 AWS 환경에서 WORKSPACE_NOT_FOUND로 끝나던 원인 — agent.py는
     project_workspaces를 이미 완전히 지원했지만 tray_app.py가 그 값을 읽어서 넘기지 않았다.

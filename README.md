@@ -125,8 +125,8 @@ pyinstaller slash_pc_runner_windows.spec
   `msedgewebview2.exe` 잔여 프로세스를 정리한 뒤 재실행하면 재현되지 않습니다. 개발 모드와
   패키징된 실행 파일을 동시에 실행하지 않으면 문제가 없습니다.
 - 리네이밍 이후 환경변수 이름도 `SLASH_AGENT_API_BASE_URL` 등에서 `SLASH_PC_RUNNER_API_BASE_URL`
-  등으로 변경되었습니다. 개발 모드 실행 시 이전 이름을 사용하면 기본값(`http://localhost:4000`)이
-  적용되어 연결이 거부된 것처럼 보일 수 있으니 주의가 필요합니다.
+  등으로 변경되었습니다. 개발 모드 실행 시 이전 이름을 사용하면 기본값(`http://localhost:4000`,
+  로컬 mock-api 전용)이 적용되어 연결이 거부된 것처럼 보일 수 있으니 주의가 필요합니다.
 
 ## 설정
 
@@ -137,13 +137,21 @@ pyinstaller slash_pc_runner_windows.spec
 2. 환경변수(`SLASH_PC_RUNNER_API_BASE_URL`, `SLASH_PC_RUNNER_PAIRING_CODE`,
    `SLASH_PC_RUNNER_DEVICE_NAME`, `SLASH_PC_RUNNER_HEARTBEAT_INTERVAL_S`) — 터미널에서
    `python -m slash_pc_runner.tray_app`으로 실행할 때 유용합니다.
-3. 기본값(`http://localhost:4000`, 자동 페어링)
+3. 기본값 — **패키징된 실행 파일**은 `https://api.dev.sbsh.cloud`(dev 서버), **개발 모드**
+   (`python -m slash_pc_runner.tray_app`/`cli`)는 `http://localhost:4000`(로컬 mock-api,
+   자동 페어링)로 서로 다릅니다. 배포판이 처음부터 dev 서버를 기본값으로 두는 이유는
+   `config.json` 없이 처음 설치한 사용자가 `localhost:4000`으로 접속을 시도하다 원인을
+   알 수 없는 "연결 거부" 에러만 보는 문제가 실제로 있었기 때문입니다(Windows 실기기에서
+   재현·확인). `pairingCode`는 어느 쪽이든 각자 다시 발급받아 넣어야 합니다 — 등록 코드는
+   PC 한 대에 종속되지 않는 값이라 공유하면 안 됩니다.
 
-앱을 처음 실행하면 위 설정 폴더에 `config.example.json`이 자동으로 생성됩니다. 메뉴의
-**"설정 폴더 열기"**로 Finder(Windows는 탐색기)에서 바로 확인할 수 있습니다. `pairingCode`를
-지정하지 않으면 시험 전용 자동 로그인으로 페어링 코드를 자동 발급받습니다(`slash-api`가
-`/test/login`, `POST /api/v1/pairing-requests`를 제공하는 경우에만 동작하며, 실제 운영
-백엔드에는 해당 엔드포인트가 없습니다).
+앱을 처음 실행하면 위 설정 폴더에 `config.example.json`이 자동으로 생성됩니다(`apiBaseUrl`
+값도 위 3번과 같은 기준으로 채워집니다). 메뉴의 **"설정 폴더 열기"**로 Finder(Windows는
+탐색기)에서 바로 확인할 수 있습니다. 개발 모드에서 `pairingCode`를 지정하지 않으면 시험
+전용 자동 로그인으로 페어링 코드를 자동 발급받습니다(`slash-api`가 `/test/login`,
+`POST /api/v1/pairing-requests`를 제공하는 local 환경에서만 동작하며, dev를 포함한 실제
+배포 백엔드에는 해당 엔드포인트가 없습니다 — 그래서 패키징된 실행 파일은 이 자동 발급을
+쓰지 않고 항상 사용자가 창에 직접 입력하게 합니다).
 
 메뉴바/트레이 아이콘 클릭 시 표시되는 항목은 상태(연결중/READY/오프라인), 기기 ID, 접속 중인
 `slash-api` 주소, 버전·커밋·빌드일자(각각 별도 줄), **색인 폴더 관리**, 설정 폴더 열기,

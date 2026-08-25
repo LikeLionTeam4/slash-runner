@@ -94,8 +94,14 @@ def _load_config() -> dict:
             file_config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             pass
+    # 얼린 앱(배포판)은 dev 서버가 기본값이다 — config.json 없이 처음 설치한 사용자가
+    # localhost:4000(로컬 mock-api 전용 주소)로 접속을 시도하다 "연결 거부"만 보고 원인을
+    # 못 찾는 문제가 실제로 있었다(Windows 실기기에서 재현). 개발 모드(not is_frozen())는
+    # `/test/login` 자동 페어링이 로컬 mock-api를 전제로 하므로 기존 기본값을 그대로 둔다
+    # — dev 서버엔 그 시험 전용 Endpoint 자체가 없어 자동 페어링이 다른 방식으로 깨진다.
+    default_api_base_url = "https://api.dev.sbsh.cloud" if is_frozen() else "http://localhost:4000"
     return {
-        "apiBaseUrl": file_config.get("apiBaseUrl") or os.environ.get("SLASH_PC_RUNNER_API_BASE_URL", "http://localhost:4000"),
+        "apiBaseUrl": file_config.get("apiBaseUrl") or os.environ.get("SLASH_PC_RUNNER_API_BASE_URL", default_api_base_url),
         "pairingCode": file_config.get("pairingCode") or os.environ.get("SLASH_PC_RUNNER_PAIRING_CODE"),
         "deviceName": file_config.get("deviceName") or os.environ.get("SLASH_PC_RUNNER_DEVICE_NAME", "slash-pc-runner-py"),
         "heartbeatIntervalS": float(
@@ -213,9 +219,10 @@ class TrayApp:
     def start_agent(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         if not CONFIG_EXAMPLE_PATH.exists():
+            example_api_base_url = "https://api.dev.sbsh.cloud" if is_frozen() else "http://localhost:4000"
             CONFIG_EXAMPLE_PATH.write_text(
                 json.dumps(
-                    {"apiBaseUrl": "http://localhost:4000", "pairingCode": "123456", "deviceName": "내 PC", "heartbeatIntervalS": 30},
+                    {"apiBaseUrl": example_api_base_url, "pairingCode": "123456", "deviceName": "내 PC", "heartbeatIntervalS": 30},
                     ensure_ascii=False,
                     indent=2,
                 ),
