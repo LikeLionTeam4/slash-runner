@@ -43,6 +43,7 @@ class TestResolveCliPath:
 
     def test_appends_shell_path_entries_not_already_present(self, monkeypatch):
         monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setattr(os, "pathsep", ":")
         monkeypatch.setenv("PATH", "/usr/bin:/bin")
         monkeypatch.setattr(
             resources.subprocess,
@@ -56,6 +57,7 @@ class TestResolveCliPath:
 
     def test_leaves_path_untouched_when_shell_lookup_fails(self, monkeypatch):
         monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setattr(os, "pathsep", ":")
         monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
         def _raise(*a, **k):
@@ -69,6 +71,7 @@ class TestResolveCliPath:
 
     def test_leaves_path_untouched_when_no_new_entries(self, monkeypatch):
         monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setattr(os, "pathsep", ":")
         monkeypatch.setenv("PATH", "/usr/bin:/bin")
         monkeypatch.setattr(
             resources.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout="/usr/bin:/bin")
