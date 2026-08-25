@@ -119,7 +119,22 @@ jobs:
           # ref에서는 브랜치명 등 버전이 아닌 값이 들어오기 때문이다(release job 주석과
           # 같은 이유).
           $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
-          Rename-Item -Path dist/Slash -NewName "Slash-$version"
+          # 바로 위 스모크 테스트가 Slash.exe를 Stop-Process -Force로 죽이는데, Windows가
+          # 그 프로세스(WebView2 자식 프로세스 포함, README "알려진 한계"의
+          # msedgewebview2.exe 잔여 프로세스와 같은 부류)의 파일 핸들을 즉시 놓지 않아
+          # Rename-Item이 "Access to the path is denied"로 실패하는 걸 실측으로 확인했다
+          # — 재시도로 완화한다.
+          $maxAttempts = 5
+          for ($i = 1; $i -le $maxAttempts; $i++) {
+            try {
+              Rename-Item -Path dist/Slash -NewName "Slash-$version" -ErrorAction Stop
+              break
+            } catch {
+              if ($i -eq $maxAttempts) { throw }
+              Write-Host "Rename-Item 실패($i/$maxAttempts), 2초 후 재시도: $_"
+              Start-Sleep -Seconds 2
+            }
+          }
           "SLASH_VERSIONED_DIR=Slash-$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: Compress-Archive -Path "dist/$env:SLASH_VERSIONED_DIR" -DestinationPath Slash-Windows-x64.zip
       - uses: actions/upload-artifact@v4
