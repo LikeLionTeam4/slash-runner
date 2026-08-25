@@ -71,6 +71,31 @@ def resolve_cli_path() -> None:
     os.environ["PATH"] = os.pathsep.join([current, *additions]) if current else os.pathsep.join(additions)
 
 
+def unblock_own_files() -> None:
+    """Windows — 다운로드한 zip을 풀어 실행하면 이 앱의 모든 파일에 "인터넷에서 받음"
+    표시(NTFS `Zone.Identifier` 대체 데이터 스트림, MOTW)가 남는다. .NET Framework의
+    netfx 로더가 이 표시가 있는 위치의 어셈블리를 신뢰하지 않는 존으로 취급해 pythonnet
+    로딩이 "Failed to resolve Python.Runtime.Loader.Initialize"로 실패하는 원인 중
+    하나였다(실측 확인, 2026-08-25 — `Get-ChildItem -Recurse | Unblock-File`로 수동
+    해제하자 이 오류가 사라졌다). macOS의 `xattr -cr`(Gatekeeper 격리 해제)과 같은
+    목적이지만, 그쪽은 앱 밖의 사용자 조치가 필요한 반면 Windows는 앱 자신의 파일이라
+    시작 시 스스로 해제할 수 있다 — 사용자에게 별도 안내 없이 고칠 수 있는 부분은
+    코드로 고친다.
+
+    실패해도(권한 문제·스트림이 이미 없음 등) 조용히 넘어간다 — 이미 해제돼 있으면
+    지울 스트림 자체가 없는 게 정상이라 대부분의 파일에서 예외가 나는 게 정상 동작이다."""
+    if sys.platform != "win32" or not is_frozen():
+        return
+    app_dir = Path(sys.executable).resolve().parent
+    for path in app_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            os.remove(f"{path}:Zone.Identifier")
+        except OSError:
+            pass
+
+
 def config_dir() -> Path:
     """앱 설정·상태 저장 디렉터리 — OS별 관례 경로로 분기한다.
     Windows는 %APPDATA%(없으면 홈 폴더 밑 AppData\\Roaming으로 폴백)에

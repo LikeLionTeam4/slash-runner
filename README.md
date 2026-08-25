@@ -99,6 +99,22 @@ pip install -e ".[build]"
 pyinstaller slash_pc_runner_windows.spec
 ```
 
+**GitHub Release로 받은 경우**: 브라우저로 내려받은 zip은 Windows가 "인터넷에서
+받음" 표시(NTFS `Zone.Identifier` 대체 스트림, MOTW)를 자동으로 붙입니다. 이 표시가
+있으면 트레이 앱 자체는 뜨지만 **PC 등록(페어링) 창을 여는 순간**
+`pythonnet`(`clr` 모듈)이 "Failed to resolve Python.Runtime.Loader.Initialize"로
+실패해 "Unhandled exception in script" 대화상자가 뜨는 걸 실기기로 확인했습니다
+(2026-08-25). 이후 버전부터는 앱이 시작 시 자신의 실행 파일 폴더 전체에서 이 표시를
+스스로 지우므로(`resources.unblock_own_files()`, `v0.5.6-pre` 다음 릴리스부터
+포함) 보통은 조치가 필요 없지만, 이 자동 해제가 권한 문제 등으로 실패하면 아래
+명령으로 직접 지울 수 있습니다
+(macOS의 `xattr -cr`과 같은 목적 — 다운로드 폴더 기준 경로, 다른 위치에 풀었다면
+그 경로로 바꿔서 실행).
+
+```powershell
+Get-ChildItem -Path "$env:USERPROFILE\Downloads\Slash-Windows-x64-<받은 버전>" -Recurse | Unblock-File
+```
+
 - 결과물: `slash-python-pc-runner/dist/Slash/Slash.exe`
   (Windows 쪽 앱 표시 이름도 macOS(`Slash.app`)와 통일하여 `SlashAgent` → `Slash`로 정리했으며,
   실기기에서 재검증을 완료했습니다.)

@@ -82,6 +82,62 @@ class TestResolveCliPath:
         assert os.environ["PATH"] == "/usr/bin:/bin"
 
 
+class TestUnblockOwnFiles:
+    def test_noop_when_not_frozen(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(resources.sys, "platform", "win32")
+        monkeypatch.setattr(resources, "is_frozen", lambda: False)
+        removed = []
+        monkeypatch.setattr(resources.os, "remove", lambda p: removed.append(p))
+
+        resources.unblock_own_files()
+
+        assert removed == []
+
+    def test_noop_on_non_windows(self, monkeypatch):
+        monkeypatch.setattr(resources.sys, "platform", "darwin")
+        monkeypatch.setattr(resources, "is_frozen", lambda: True)
+        removed = []
+        monkeypatch.setattr(resources.os, "remove", lambda p: removed.append(p))
+
+        resources.unblock_own_files()
+
+        assert removed == []
+
+    def test_attempts_to_remove_zone_identifier_stream_for_every_file(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(resources.sys, "platform", "win32")
+        monkeypatch.setattr(resources, "is_frozen", lambda: True)
+        exe_dir = tmp_path / "Slash-0.5.6"
+        exe_dir.mkdir()
+        monkeypatch.setattr(resources.sys, "executable", str(exe_dir / "Slash.exe"))
+        (exe_dir / "Slash.exe").write_text("", encoding="utf-8")
+        internal = exe_dir / "_internal"
+        internal.mkdir()
+        (internal / "Python.Runtime.dll").write_text("", encoding="utf-8")
+
+        removed = []
+        monkeypatch.setattr(resources.os, "remove", lambda p: removed.append(p))
+
+        resources.unblock_own_files()
+
+        assert f"{exe_dir / 'Slash.exe'}:Zone.Identifier" in removed
+        assert f"{internal / 'Python.Runtime.dll'}:Zone.Identifier" in removed
+
+    def test_swallows_errors_when_stream_already_absent(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(resources.sys, "platform", "win32")
+        monkeypatch.setattr(resources, "is_frozen", lambda: True)
+        exe_dir = tmp_path / "Slash-0.5.6"
+        exe_dir.mkdir()
+        monkeypatch.setattr(resources.sys, "executable", str(exe_dir / "Slash.exe"))
+        (exe_dir / "Slash.exe").write_text("", encoding="utf-8")
+
+        def _raise(p):
+            raise OSError("stream not found")
+
+        monkeypatch.setattr(resources.os, "remove", _raise)
+
+        resources.unblock_own_files()  # 예외가 밖으로 나오지 않아야 한다
+
+
 class TestMigrateLegacyConfigDir:
     def test_moves_old_directory_to_new_name(self, tmp_path, monkeypatch):
         monkeypatch.setattr(resources.sys, "platform", "darwin")

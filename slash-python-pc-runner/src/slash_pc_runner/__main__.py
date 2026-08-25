@@ -8,15 +8,35 @@ _folders_window_command 참고) — 그래서 트레이 기동과 색인 폴더 
 
 from __future__ import annotations
 
+import os
 import sys
+
+# pywebview의 winforms 백엔드(Windows GUI, 트레이·페어링창·폴더창 전부 이걸 거친다)가
+# 내부적으로 pythonnet(import clr)을 쓴다. pythonnet은 Windows에서 기본값으로 구식 netfx
+# (.NET Framework) 경로를 쓰는데, 이 경로가 PyInstaller로 얼린 실행 파일 환경에서
+# "Failed to resolve Python.Runtime.Loader.Initialize"로 실패하는 걸 실기기로 확인했다
+# (2026-08-25). pywebview 자신도 netfx import 실패 시 coreclr로 재시도하는 폴백이 있지만
+# (webview/platforms/winforms.py의 try/except), 실패한 첫 시도가 같은 프로세스의 CLR 호스트
+# 상태를 오염시켜 재시도가 항상 깨끗이 성공한다는 보장이 없다 — 그래서 아예 처음부터
+# coreclr을 쓰도록 강제한다. 이 파일이 로드되는 즉시 적용돼야(어떤 분기를 타든 무조건)
+# 하므로 함수 안이 아니라 모듈 최상단에 둔다. macOS·Linux는 pythonnet/clr을 아예 안 쓰므로
+# 이 값이 있어도 무해하다.
+#
+# 미검증: 이 PC에 .NET Desktop Runtime(Microsoft.WindowsDesktop.App)이 없으면 coreclr을
+# 강제해도 System.Windows.Forms 로딩이 별도로 실패할 수 있다 — 아직 실기기로 끝까지
+# 검증되지 않았다(not_push_git_docs의 관련 지시문 참고).
+os.environ.setdefault("PYTHONNET_RUNTIME", "coreclr")
 
 
 def main() -> None:
     # 다른 어떤 분기보다 먼저 — single_instance.py의 락 파일 생성을 포함해 config_dir()를
     # 쓰는 모든 코드보다 앞서야 마이그레이션이 "새 폴더가 아직 없다" 조건을 안전하게 본다
     # (resources.migrate_legacy_config_dir() 주석 참고).
-    from .resources import migrate_legacy_config_dir, resolve_cli_path
+    from .resources import migrate_legacy_config_dir, resolve_cli_path, unblock_own_files
 
+    # webview/pythonnet을 쓰는 어떤 분기보다 먼저 — Windows에서 다운로드한 zip의 MOTW
+    # 표시가 pythonnet 로딩 실패의 원인이 될 수 있다(위 PYTHONNET_RUNTIME 주석 참고).
+    unblock_own_files()
     migrate_legacy_config_dir()
     # claude/codex CLI를 실제로 실행하는 분기(트레이/에이전트)보다 먼저 — GUI로 실행된
     # 얼린 앱은 launchd 기본 PATH만 가져 Homebrew 등에 설치된 CLI를 못 찾는다(#44).
