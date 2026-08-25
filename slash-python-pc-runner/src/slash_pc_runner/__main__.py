@@ -8,24 +8,16 @@ _folders_window_command 참고) — 그래서 트레이 기동과 색인 폴더 
 
 from __future__ import annotations
 
-import os
 import sys
 
-# pywebview의 winforms 백엔드(Windows GUI, 트레이·페어링창·폴더창 전부 이걸 거친다)가
-# 내부적으로 pythonnet(import clr)을 쓴다. pythonnet은 Windows에서 기본값으로 구식 netfx
-# (.NET Framework) 경로를 쓰는데, 이 경로가 PyInstaller로 얼린 실행 파일 환경에서
-# "Failed to resolve Python.Runtime.Loader.Initialize"로 실패하는 걸 실기기로 확인했다
-# (2026-08-25). pywebview 자신도 netfx import 실패 시 coreclr로 재시도하는 폴백이 있지만
-# (webview/platforms/winforms.py의 try/except), 실패한 첫 시도가 같은 프로세스의 CLR 호스트
-# 상태를 오염시켜 재시도가 항상 깨끗이 성공한다는 보장이 없다 — 그래서 아예 처음부터
-# coreclr을 쓰도록 강제한다. 이 파일이 로드되는 즉시 적용돼야(어떤 분기를 타든 무조건)
-# 하므로 함수 안이 아니라 모듈 최상단에 둔다. macOS·Linux는 pythonnet/clr을 아예 안 쓰므로
-# 이 값이 있어도 무해하다.
-#
-# 미검증: 이 PC에 .NET Desktop Runtime(Microsoft.WindowsDesktop.App)이 없으면 coreclr을
-# 강제해도 System.Windows.Forms 로딩이 별도로 실패할 수 있다 — 아직 실기기로 끝까지
-# 검증되지 않았다(not_push_git_docs의 관련 지시문 참고).
-os.environ.setdefault("PYTHONNET_RUNTIME", "coreclr")
+# 한때 여기서 PYTHONNET_RUNTIME=coreclr을 강제했었다 — 되돌렸다. netfx(Windows 기본값)
+# 자체는 문제가 없었고(개발 모드에서 pywebview의 winforms 백엔드 전체 임포트까지 정상
+# 확인, 2026-08-25), 원래 크래시("Failed to resolve Python.Runtime.Loader.Initialize")는
+# 다운로드 zip의 MOTW 표시(Zone.Identifier) 때문이었다 — 아래 unblock_own_files()가
+# 그걸 지운다. coreclr을 강제해봤더니 오히려 pywebview가 netfx 어셈블리 레이아웃을
+# 전제로 짠 코드(Microsoft.Win32.SystemEvents가 System.Windows.Forms에 안 딸려 나옴,
+# IFileDialog COM 인터롭 타입 해석 실패 등)에서 새 크래시가 여러 개 나왔다 — coreclr
+# 경로는 pywebview 쪽에서 제대로 지원 안 하는 것으로 보인다. netfx를 그대로 쓰는 게 맞다.
 
 
 def main() -> None:
