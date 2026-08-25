@@ -108,7 +108,20 @@ jobs:
             -Wait -PassThru -RedirectStandardOutput "ssl-selfcheck-out.txt" -RedirectStandardError "ssl-selfcheck-err.txt"
           Get-Content "ssl-selfcheck-out.txt", "ssl-selfcheck-err.txt" -ErrorAction SilentlyContinue
           if ($proc.ExitCode -ne 0) { exit 1 }
-      - run: Compress-Archive -Path dist/Slash -DestinationPath Slash-Windows-x64.zip
+      - name: 압축 해제 시 생성되는 폴더 이름에 버전을 포함시킨다
+        shell: pwsh
+        run: |
+          # Windows는 zip을 풀면 폴더가 그대로 남는 배포 방식이라(macOS의 단일 .app
+          # 번들과 다름), 폴더 이름이 항상 "Slash"면 여러 버전을 받아도 어느 게 몇
+          # 버전인지 구분이 안 된다. pyproject.toml의 version(=PACKAGE_VERSION과 항상
+          # 같은 값, _build_info.py 주석 참고)을 그대로 폴더 이름에 붙인다 — 태그 이름
+          # (github.ref_name)은 안 쓴다, 이 job은 dev push·PR에서도 돌아 태그가 아닌
+          # ref에서는 브랜치명 등 버전이 아닌 값이 들어오기 때문이다(release job 주석과
+          # 같은 이유).
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          Rename-Item -Path dist/Slash -NewName "Slash-$version"
+          "SLASH_VERSIONED_DIR=Slash-$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - run: Compress-Archive -Path "dist/$env:SLASH_VERSIONED_DIR" -DestinationPath Slash-Windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Slash-Windows-x64
