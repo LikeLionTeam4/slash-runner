@@ -123,16 +123,23 @@ jobs:
           # 그 프로세스(WebView2 자식 프로세스 포함, README "알려진 한계"의
           # msedgewebview2.exe 잔여 프로세스와 같은 부류)의 파일 핸들을 즉시 놓지 않아
           # Rename-Item이 "Access to the path is denied"로 실패하는 걸 실측으로 확인했다
-          # — 재시도로 완화한다.
-          $maxAttempts = 5
+          # (2초x5회 재시도로도 재현됨 — 단순 타이밍 문제보다 오래간다, Windows Defender의
+          # 방금 실행된 exe 실시간 검사일 가능성도 있다). 남은 프로세스를 직접 찾아
+          # 종료까지 기다린 뒤, 그래도 남는 지연에 대비해 재시도도 같이 둔다.
+          Get-Process -Name "Slash", "msedgewebview2" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "잔여 프로세스 종료: $($_.ProcessName) (PID $($_.Id))"
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            $_.WaitForExit(10000) | Out-Null
+          }
+          $maxAttempts = 10
           for ($i = 1; $i -le $maxAttempts; $i++) {
             try {
               Rename-Item -Path dist/Slash -NewName "Slash-$version" -ErrorAction Stop
               break
             } catch {
               if ($i -eq $maxAttempts) { throw }
-              Write-Host "Rename-Item 실패($i/$maxAttempts), 2초 후 재시도: $_"
-              Start-Sleep -Seconds 2
+              Write-Host "Rename-Item 실패($i/$maxAttempts), 3초 후 재시도: $_"
+              Start-Sleep -Seconds 3
             }
           }
           "SLASH_VERSIONED_DIR=Slash-$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
