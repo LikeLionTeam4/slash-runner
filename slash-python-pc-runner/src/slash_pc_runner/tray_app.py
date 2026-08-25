@@ -114,6 +114,15 @@ def _log(line: str) -> None:
     # 파일/파이프로 리다이렉트되면 표준출력이 완전 버퍼링돼 프로세스 종료 전까지 안 보인다
     # (cli.py에서 이미 겪은 문제와 동일) — 매번 강제로 흘려보낸다.
     print(line, flush=True)
+    # 패키징된 GUI 앱은 콘솔이 없어(console=False) 탐색기로 실행하면 위 print()를 볼 방법이
+    # 아예 없다 — 실기기 디버깅 중 이 공백 때문에 원인 파악이 막힌 적이 있어(2026-08-25)
+    # 최소한의 파일 로그를 남긴다. 실패해도(디스크 문제 등) 조용히 넘어간다.
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with (CONFIG_DIR / "tray.log").open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
 
 
 def _obtain_pairing_code(api_base_url: str) -> str:
