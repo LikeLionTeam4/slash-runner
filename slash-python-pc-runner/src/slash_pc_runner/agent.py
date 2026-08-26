@@ -39,6 +39,7 @@ from .identity_store import AgentIdentityStore, PersistedAgentIdentity
 from .pairing_client import DeviceRevokedError, pair_agent, refresh_session, verify_pairing
 from .platform_info import detect_architecture, detect_os
 from .processed_task_store import ProcessedTaskStore
+from .project_workspace_store import ProjectWorkspaceStore
 from .protocol import (
     build_challenge_signing_payload,
     build_refresh_signing_payload,
@@ -135,8 +136,10 @@ class ContractPcRunnerOptions:
     # 검색 대상 폴더 목록(정적 설정) — 등록 UI는 아직 없어서 지금은 시작 시 고정 목록만 지원
     search_folders: list = field(default_factory=list)
     file_index_store: Optional[FileIndexStore] = None
-    # CODE_ANALYSIS 대상 프로젝트 폴더 목록(정적 설정) — search_folders와 같은 이유로 등록 UI 없음
-    project_workspaces: list[ProjectWorkspaceConfig] = field(default_factory=list)
+    # CODE_ANALYSIS 대상 프로젝트 폴더. file_index_store와 같이 상태 객체가 들고 있어,
+    # 관리 창에서 폴더를 바꾸면 재시작 없이 반영된다(#46 — 예전엔 여기 평범한 리스트라
+    # 시작 시점 스냅샷에 고정됐다).
+    project_workspace_store: Optional[ProjectWorkspaceStore] = None
 
 
 class ContractPcRunner:
@@ -192,6 +195,31 @@ class ContractPcRunner:
         self._ready_waiters.append(event)
         if not event.wait(timeout_s):
             raise TimeoutError("slash-pc-runner READY 대기 타임아웃")
+
+    def resend_ready(self) -> None:
+        """능력 보고(READY)를 다시 보내 서버 쪽 목록을 갱신한다.
+
+        검색 폴더·프로젝트 폴더는 관리 창에서 언제든 바뀌는데, READY는 원래 연결 직후
+        한 번만 나간다. 재연결로도 갱신되지만 그러면 실행 중인 작업(CODE_ANALYSIS는 최대
+        300초)이 끊긴다. 서버의 `handleReady()`는 AUTHENTICATED 상태이기만 하면 READY를
+        다시 받아 `replaceAll`로 덮어쓰므로(재수신을 막는 조건이 없다), 연결을 유지한 채
+        이것만 보내면 된다.
+
+        READY 상태가 아니면(연결 전·재연결 중) 아무것도 하지 않는다 — 어차피 다음 연결의
+        READY가 최신 목록을 싣고 나간다."""
+        socket = self._socket
+        if socket is None or self._state != "READY":
+            return
+        try:
+            self._send(socket, "READY", **self._build_ready())
+            # 성공도 남긴다 — 남기지 않으면 "폴더를 바꿨는데 서버가 아직 모른다"를
+            # 조사할 때 재전송이 실제로 나갔는지 확인할 방법이 없다(실기기 검증에서
+            # 실제로 겪었다, 2026-08-26).
+            self._log("등록 폴더 변경 반영 — READY 재전송")
+        except Exception as e:
+            # 보내지 못해도 로컬 목록은 이미 갱신돼 있고, 다음 재연결 때 READY가 최신
+            # 상태로 나간다. 등록 창 조작이 실패로 보이면 안 되니 예외를 삼킨다.
+            self._log(f"READY 재전송 실패(무시): {e}")
 
     def stop(self) -> None:
         self._stopped = True
@@ -394,16 +422,14 @@ class ContractPcRunner:
         )
 
     def _build_ready(self) -> dict:
+        # 두 목록 다 상태 객체에서 실시간으로 읽는다 — 이 함수 안에서 한쪽만 스냅샷이던
+        # 비대칭이 #46의 원인이었다.
         search_folders = self._options.file_index_store.list_search_folders() if self._options.file_index_store else []
-        project_workspaces = [
-            dict(
-                workspaceId=workspace.workspace_id,
-                displayName=workspace.display_name,
-                workspaceType=workspace.workspace_type,
-                availableCodeAdapters=list(workspace.available_code_adapters),
-            )
-            for workspace in self._options.project_workspaces
-        ]
+        project_workspaces = (
+            self._options.project_workspace_store.list_workspaces()
+            if self._options.project_workspace_store
+            else []
+        )
         # slash-api는 아직 TEXT_SUMMARY를 LLM_SERVICE로만 라우팅해 이 값을 안 쓴다(RUN-01) —
         # CODE_ANALYSIS의 projectWorkspaces가 그랬듯, 라우팅이 붙기 전에 능력치부터 미리
         # 보고해 둔다.
@@ -674,7 +700,8 @@ class ContractPcRunner:
         return None
 
     def _find_project_workspace(self, workspace_id: Optional[str]) -> Optional[ProjectWorkspaceConfig]:
-        return next((w for w in self._options.project_workspaces if w.workspace_id == workspace_id), None)
+        store = self._options.project_workspace_store
+        return store.find(workspace_id) if store else None
 
     def _resolve_code_adapter(self, workspace: ProjectWorkspaceConfig, requested: Optional[str]) -> Optional[str]:
         # 요청에 codeAdapter가 없으면 그 워크스페이스가 지원하는 첫 번째 어댑터를 기본으로 쓴다.

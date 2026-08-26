@@ -11,6 +11,7 @@ import pytest
 import slash_pc_runner.agent as agent_module
 from slash_pc_runner.agent import ContractPcRunner, ContractPcRunnerOptions
 from slash_pc_runner.code_adapters import ProjectWorkspaceConfig
+from slash_pc_runner.project_workspace_store import ProjectWorkspaceStore
 
 from fake_pc_runner_server import start_fake_pc_runner_server
 
@@ -43,7 +44,7 @@ def make_workspace(tmp_path, adapters=("CLAUDE_CODE",)) -> ProjectWorkspaceConfi
 
 def test_reports_project_workspaces_in_ready(server, tmp_path):
     workspace = make_workspace(tmp_path, adapters=["CLAUDE_CODE", "CODEX"])
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         ready = server.wait_for_message("READY")
     finally:
@@ -71,7 +72,7 @@ def test_succeeds_with_configured_adapter(server, tmp_path, monkeypatch):
         lambda root_path, query: {"codeAdapter": "CLAUDE_CODE", "summary": f"[{root_path}] {query}", "turns": 1, "durationMs": 10, "collectedAt": "now"},
     )
 
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         server.send_task(
             str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "구조 설명해줘"}
@@ -101,7 +102,7 @@ def test_rejects_unknown_workspace(server):
 
 def test_rejects_workspace_with_no_available_adapter(server, tmp_path):
     workspace = make_workspace(tmp_path, adapters=[])
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "설명"})
         ack = server.wait_for_message("ACK")
@@ -113,7 +114,7 @@ def test_rejects_workspace_with_no_available_adapter(server, tmp_path):
 
 def test_rejects_requested_adapter_not_in_workspace(server, tmp_path):
     workspace = make_workspace(tmp_path, adapters=["CLAUDE_CODE"])
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         server.send_task(
             str(uuid.uuid4()),
@@ -140,7 +141,7 @@ def test_codex_streams_turn_progress_via_wss(server, tmp_path, monkeypatch):
 
     monkeypatch.setitem(agent_module.CODE_ADAPTER_RUNNERS, "CODEX", fake_codex_runner)
 
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "설명해줘"})
         server.wait_for_message("ACK")
@@ -211,7 +212,7 @@ def test_oversized_result_is_truncated_before_result_sent(server, tmp_path, monk
 
     monkeypatch.setitem(agent_module.CODE_ADAPTER_RUNNERS, "CLAUDE_CODE", fake_runner)
 
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "설명"})
         server.wait_for_message("ACK")
@@ -235,7 +236,7 @@ def test_execution_failure_maps_to_policy_denied(server, tmp_path, monkeypatch):
 
     monkeypatch.setitem(agent_module.CODE_ADAPTER_RUNNERS, "CLAUDE_CODE", failing_runner)
 
-    agent = start_agent(server, project_workspaces=[workspace])
+    agent = start_agent(server, project_workspace_store=ProjectWorkspaceStore([workspace]))
     try:
         server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "설명"})
         server.wait_for_message("ACK")
@@ -244,3 +245,83 @@ def test_execution_failure_maps_to_policy_denied(server, tmp_path, monkeypatch):
         assert result["error"]["code"] == "POLICY_DENIED"
     finally:
         agent.stop()
+
+
+# ---- 워크스페이스 실시간 갱신 (slash-runner#46) ----
+#
+# 관리 창에서 폴더를 추가해도 재시작 전까지 WORKSPACE_NOT_FOUND가 계속 나던 결함.
+# 원인은 _build_ready()가 search_folders는 상태 객체에서 실시간으로 읽으면서
+# project_workspaces만 시작 시점 스냅샷을 쓰던 비대칭이었다.
+
+
+def test_workspace_added_after_start_is_usable_without_restart(server, tmp_path, monkeypatch):
+    """저장소에 나중에 넣은 워크스페이스로 온 TASK가 거절되지 않아야 한다."""
+    monkeypatch.setitem(agent_module.CODE_ADAPTER_AVAILABILITY_CHECKS, "CLAUDE_CODE", lambda: True)
+    monkeypatch.setitem(
+        agent_module.CODE_ADAPTER_RUNNERS,
+        "CLAUDE_CODE",
+        lambda root_path, query: {"codeAdapter": "CLAUDE_CODE", "summary": "ok", "turns": 1, "durationMs": 1},
+    )
+
+    store = ProjectWorkspaceStore()  # 빈 상태로 시작 — 폴더를 아직 등록하지 않은 사용자
+    agent = start_agent(server, project_workspace_store=store)
+    try:
+        # 등록 전에는 거절된다(현재 동작 확인 — 이게 사용자가 겪던 상태다)
+        server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "설명"})
+        rejected = server.wait_for_message("ACK")
+        assert rejected["accepted"] is False
+        assert rejected["reasonCode"] == "WORKSPACE_NOT_FOUND"
+
+        # 관리 창에서 폴더를 추가한 상황
+        store.sync_workspaces([make_workspace(tmp_path, adapters=["CLAUDE_CODE"])])
+
+        # 재시작 없이 바로 받아들여져야 한다
+        since = len(server.received_messages)
+        server.send_task(str(uuid.uuid4()), str(uuid.uuid4()), "CODE_ANALYSIS", {"workspaceId": "w1", "query": "설명"})
+        accepted = server.wait_for_message("ACK", since_index=since)
+        assert accepted["accepted"] is True
+    finally:
+        agent.stop()
+
+
+def test_resend_ready_reports_updated_workspaces(server, tmp_path):
+    """resend_ready()가 서버에 갱신된 목록을 다시 보내야 한다 — 재연결 없이."""
+    store = ProjectWorkspaceStore()
+    agent = start_agent(server, project_workspace_store=store)
+    try:
+        first = server.wait_for_message("READY")
+        assert first["projectWorkspaces"] == []
+
+        store.sync_workspaces([make_workspace(tmp_path, adapters=["CLAUDE_CODE"])])
+        since = len(server.received_messages)
+        agent.resend_ready()
+
+        second = server.wait_for_message("READY", since_index=since)
+        assert [w["workspaceId"] for w in second["projectWorkspaces"]] == ["w1"]
+
+        # 재연결이 아니라 같은 연결에서 READY만 다시 나갔는지 — HELLO가 또 오면 안 된다
+        hello_count = sum(1 for m in server.received_messages if m.get("type") == "HELLO")
+        assert hello_count == 1
+    finally:
+        agent.stop()
+
+
+def test_resend_ready_is_noop_when_not_connected(server, tmp_path):
+    """연결 전·중단 후 호출해도 예외가 나가면 안 된다(등록 창 조작이 실패로 보이면 안 됨)."""
+    store = ProjectWorkspaceStore([make_workspace(tmp_path)])
+    agent = ContractPcRunner(
+        ContractPcRunnerOptions(
+            api_base_url=server.url,
+            pairing_code="000000",
+            heartbeat_interval_s=60,
+            project_workspace_store=store,
+        )
+    )
+
+    agent.resend_ready()  # start() 전 — 소켓이 없다
+
+    agent.start()
+    agent.wait_until_ready()
+    agent.stop()
+
+    agent.resend_ready()  # stop() 후 — 상태가 STOPPED다

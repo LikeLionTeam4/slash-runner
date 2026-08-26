@@ -29,6 +29,7 @@ from . import single_instance
 from ._build_info import PACKAGE_VERSION, get_build_date, get_build_sha
 from .agent import ContractPcRunner, ContractPcRunnerOptions
 from .code_adapters import ProjectWorkspaceConfig
+from .project_workspace_store import ProjectWorkspaceStore
 from .file_index import FileIndexStore, SearchFolderConfig
 from .identity_store import FileIdentityStore, KeyringIdentityStore
 from .pairing_client import DeviceRevokedError
@@ -85,6 +86,18 @@ def _load_project_workspaces() -> list[dict]:
         return json.loads(PROJECT_WORKSPACES_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
+
+
+def _build_project_workspaces() -> list[ProjectWorkspaceConfig]:
+    """저장된 JSON을 실행에 쓰는 설정으로 바꾼다.
+
+    `from_root_path()`가 `.git` 존재 여부와 CLI 설치 여부를 그 시점에 다시 판정하므로,
+    폴더를 다시 읽을 때마다 최신 상태가 반영된다(예: 나중에 codex를 설치하면 다음
+    갱신에서 `availableCodeAdapters`에 잡힌다)."""
+    return [
+        ProjectWorkspaceConfig.from_root_path(w["workspaceId"], w["displayName"], w["rootPath"])
+        for w in _load_project_workspaces()
+    ]
 
 
 def _load_config() -> dict:
@@ -184,8 +197,11 @@ class TrayApp:
 
         self.agent: Optional[ContractPcRunner] = None
         self.file_index_store: Optional[FileIndexStore] = None
+        self.project_workspace_store: Optional[ProjectWorkspaceStore] = None
         self.current_config: dict = {}
         self._search_folders_mtime: Optional[float] = None
+        self._search_folder_statuses: dict[str, str] = {}
+        self._project_workspaces_mtime: Optional[float] = None
         self.folders_window_proc: Optional[subprocess.Popen] = None
         self.project_workspaces_window_proc: Optional[subprocess.Popen] = None
         self._status_text = "상태: 연결 중..."
@@ -252,12 +268,14 @@ class TrayApp:
 
         folders = _load_search_folders()
         self._search_folders_mtime = SEARCH_FOLDERS_PATH.stat().st_mtime if SEARCH_FOLDERS_PATH.exists() else None
+        # 기동 직후 첫 refresh()가 "바뀐 것"으로 오인하지 않게 현재 상태를 기준선으로 잡는다.
+        self._search_folder_statuses = {}
         search_folders = [SearchFolderConfig(f["searchFolderId"], f["displayName"], f["rootPath"]) for f in folders]
 
-        workspaces = _load_project_workspaces()
-        project_workspaces = [
-            ProjectWorkspaceConfig.from_root_path(w["workspaceId"], w["displayName"], w["rootPath"]) for w in workspaces
-        ]
+        self.project_workspace_store = ProjectWorkspaceStore(_build_project_workspaces())
+        self._project_workspaces_mtime = (
+            PROJECT_WORKSPACES_PATH.stat().st_mtime if PROJECT_WORKSPACES_PATH.exists() else None
+        )
 
         api_base_url = self.current_config["apiBaseUrl"]
         has_persisted_identity = identity_store.load() is not None
@@ -275,7 +293,7 @@ class TrayApp:
                     processed_task_store=processed_task_store,
                     search_folders=search_folders,
                     file_index_store=self.file_index_store,
-                    project_workspaces=project_workspaces,
+                    project_workspace_store=self.project_workspace_store,
                 )
             )
 
@@ -360,7 +378,11 @@ class TrayApp:
             self._api_text = f"mock-api: {self.current_config.get('apiBaseUrl', '-')}"
             self.icon.update_menu()
 
-        # folders_window(별도 프로세스)가 search-folders.json을 바꿨는지 주기적으로 확인
+        # 관리 창(별도 프로세스)이 설정 JSON을 바꿨는지 주기적으로 확인한다.
+        # 로컬 상태를 갱신한 뒤 READY를 다시 보내 서버 쪽 목록도 맞춘다 — 재연결로도
+        # 되지만 그러면 실행 중인 작업이 끊긴다(#46).
+        reported_changed = False
+
         if self.file_index_store is not None and SEARCH_FOLDERS_PATH.exists():
             mtime = SEARCH_FOLDERS_PATH.stat().st_mtime
             if mtime != self._search_folders_mtime:
@@ -368,6 +390,27 @@ class TrayApp:
                 folders = _load_search_folders()
                 search_folders = [SearchFolderConfig(f["searchFolderId"], f["displayName"], f["rootPath"]) for f in folders]
                 self.file_index_store.sync_folders(search_folders)
+
+        # 색인 상태는 파일이 아니라 색인 스레드가 바꾸므로 mtime으로 안 잡힌다 — 폴더가
+        # 늘거나 줄어든 것도 여기서 같이 드러나므로(키 집합이 바뀐다) 검색 폴더 쪽 재전송
+        # 판단은 이 비교 하나로 모은다. 서버는 INDEXING을 제외가 아니라 후순위로 다루지만
+        # (DeviceSearchFolderRepository.pickSearchable), 끝난 뒤에도 계속 INDEXING으로
+        # 남으면 우선순위가 계속 밀린다.
+        if self.file_index_store is not None:
+            statuses = {f["searchFolderId"]: f["indexStatus"] for f in self.file_index_store.list_search_folders()}
+            if statuses != self._search_folder_statuses:
+                self._search_folder_statuses = statuses
+                reported_changed = True
+
+        if self.project_workspace_store is not None and PROJECT_WORKSPACES_PATH.exists():
+            mtime = PROJECT_WORKSPACES_PATH.stat().st_mtime
+            if mtime != self._project_workspaces_mtime:
+                self._project_workspaces_mtime = mtime
+                self.project_workspace_store.sync_workspaces(_build_project_workspaces())
+                reported_changed = True
+
+        if reported_changed and self.agent is not None:
+            self.agent.resend_ready()
 
     def open_folders_window(self, icon, item) -> None:
         if not SEARCH_FOLDERS_PATH.exists():
