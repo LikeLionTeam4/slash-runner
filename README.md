@@ -46,6 +46,29 @@ cli.py                   GUI 없는 개발용 CLI 진입점
 __main__.py              단일 진입점 — 트레이 기동 / 색인 폴더 창 분기
 ```
 
+## 설치와 등록(릴리스 사용자)
+
+배포판을 받아 쓰는 경우의 절차입니다. 개발 모드는 다음 절을 보세요.
+
+1. [Releases](https://github.com/LikeLionTeam4/slash-runner/releases)에서 OS에 맞는 zip을
+   내려받아 압축을 풉니다. 폴더 이름은 `Slash-<버전>` 형태입니다.
+2. **macOS** — `Slash.app`을 실행합니다. "확인되지 않은 개발자" 안내가 뜨면 코드 서명을
+   하지 않은 배포판이라 그렇습니다. 아래 명령으로 격리 속성을 지운 뒤 다시 실행합니다.
+
+   ```bash
+   xattr -cr /경로/Slash.app
+   ```
+
+3. **Windows** — `Slash.exe`를 **탐색기에서 더블클릭**으로 실행합니다. 인터넷에서 받은
+   표시(MOTW)는 앱이 시작 시 스스로 지우므로 `Unblock-File`을 먼저 실행할 필요가 없습니다.
+4. 웹(`dev.sbsh.cloud`)에서 **6자리 등록 코드**를 발급받습니다.
+5. 앱이 띄우는 **PC 등록 창에 그 코드를 입력**합니다. 설정 파일을 직접 편집할 필요가
+   없습니다 — `config.json`의 `pairingCode`는 개발 모드용이며, 배포판은 항상 창으로 받습니다.
+6. 트레이 아이콘의 상태가 `READY`가 되면 등록이 끝난 것입니다.
+
+폴더 등록은 트레이 메뉴에서 합니다 — `/파일` 대상은 **색인 폴더 관리**, `/코드` 대상은
+**프로젝트 폴더 관리**입니다. 추가·삭제는 앱을 재시작하지 않아도 즉시 반영됩니다.
+
 ## 실행 방법(개발 모드, 패키징 없이)
 
 ```bash
@@ -327,21 +350,26 @@ PC 작업 실행기는 여섯 가지 `taskType`을 처리하며, 그 외는 `TAS
   `CODE_AGENT_NOT_CONFIGURED`로 거부합니다.
 - **`CODE_ANALYSIS`**: `parameters.{workspaceId, query, codeAdapter?}`로 지정한 프로젝트
   폴더에서 로컬에 설치된 `claude`/`codex` CLI를 실제로 **실행**해 분석 결과를 받습니다.
-  쓰기·셸 실행 도구는 CLI 플래그로 구조적으로 차단해 읽기 전용입니다.
+  쓰기·셸 실행 도구(`Write,Edit,Bash`)를 CLI 플래그로 차단해 읽기 전용으로 둡니다.
+  **MCP 도구는 차단하지 않습니다** — `TEXT_SUMMARY` 항목과 같은 미완료 항목입니다.
+  읽기 전용 보장이 CLI 플래그 자체에 의존한다는 것이 이 경로의 알려진 위험입니다.
   `{codeAdapter, summary, turns, durationMs, collectedAt}`를 반환하며, 결과가 서버 저장
   상한(64KB)을 넘으면 잘라서 보냅니다. 등록되지 않은 워크스페이스는 `WORKSPACE_NOT_FOUND`,
   CLI가 설치되어 있지 않으면 `CODE_AGENT_NOT_CONFIGURED`로 거부합니다.
 - **`TEXT_SUMMARY`**: `parameters.text`로 받은 텍스트를 로컬에 설치된 `claude`/`codex`
   CLI로 3문장 이내 요약합니다. `CODE_ANALYSIS`와 달리 등록된 프로젝트 폴더가 필요 없어
   매 실행마다 빈 임시 디렉터리에서 실행하고, 텍스트는 CLI 인자가 아니라 표준입력으로
-  전달합니다. 파일 쓰기·Shell 실행·웹 검색·MCP 도구를 전부 차단합니다.
+  전달합니다. 파일 쓰기·Shell 실행·웹 검색 도구를 차단합니다 — 차단 목록은
+  `Write,Edit,Bash,WebSearch,WebFetch,NotebookEdit,Task`입니다. **MCP 도구는 차단하지
+  않습니다**(`--strict-mcp-config` 등 MCP 자체를 막는 플래그를 지정하지 않음) —
+  `slash-docs#3` 보안 검토에서 확인된 미완료 항목입니다.
   `{summaryAdapter, summary, durationMs, collectedAt}`를 반환하며, 결과가 서버 저장
   상한(64KB)을 넘으면 `CODE_ANALYSIS`와 같은 방식으로 잘라서 보냅니다. **현재
-  slash-api는 이 taskType을 아직 `LLM_SERVICE`로만 라우팅해(`ProcessingRoute` 고정)
-  Runner로 TASK가 실제로 오지는 않습니다** — 클라우드 LLM 제거 계획(`slash-docs#3`)의
-  라우팅 작업이 붙기 전까지는 `READY`의 `availableSummaryAdapters` 보고와 배선만
-  미리 준비된 상태입니다. 로컬에 CLI가 하나도 없으면 `CODE_AGENT_NOT_CONFIGURED`로
-  거부합니다.
+  이 경로로 TASK가 오지 않습니다 — 라우팅은 이미 붙었고 설정 플래그로 꺼져
+  있습니다**(`slash-api`의 `slash.text-summary.runner-enabled`, 기본값 `false`).
+  위 MCP 미차단을 포함한 인젝션 방어가 완성되기 전까지 닫아 두기로 `slash-docs#3`
+  보안 검토에서 확정한 것입니다. 서버 요약은 `slash-nlu`의 CPU 추출 요약이
+  담당합니다. 로컬에 CLI가 하나도 없으면 `CODE_AGENT_NOT_CONFIGURED`로 거부합니다.
 
 ### 4) 안정성 관련 동작
 

@@ -1,6 +1,7 @@
 """기기 식별 정보(개인키·deviceId·deviceToken) 영속화.
 
-agentIdentityStore.ts + main.cjs의 createIdentityStore(safeStorage/Keychain) 대응.
+agentIdentityStore.ts + main.cjs의 createIdentityStore(safeStorage/Keychain) 대응
+(Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸).
 
 원래는 keyring(OS 보안 저장소 — macOS Keychain / Windows Credential Manager)을 썼는데,
 ad-hoc 서명 macOS 앱은 빌드마다 CDHash가 달라져 Keychain 접근 권한(ACL)이 앱 바이너리

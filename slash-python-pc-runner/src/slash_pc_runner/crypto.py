@@ -1,4 +1,4 @@
-"""Ed25519 기기 신원 — agentCrypto.ts 대응."""
+"""Ed25519 기기 신원 — agentCrypto.ts 대응 (Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸)."""
 
 from __future__ import annotations
 
