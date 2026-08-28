@@ -9,7 +9,7 @@ Slash(/)는 자연어 질문과 `/` 슬래시 명령어를 한 입력창에서 �
 - 상태 조회
 - 로컬 AI 실행 및 결과 전달
 
-## 구성
+## 구조
 
 ```text
 slash-python-pc-runner/ 구현 전체 — WebSocket 클라이언트, Ed25519 인증, SQLite FTS5 파일 색인,
@@ -143,7 +143,7 @@ Get-ChildItem -Path "$env:USERPROFILE\Downloads\Slash-Windows-x64-<받은 버전
   실기기에서 재검증을 완료했습니다.)
 - 트레이(`pystray`)와 색인 폴더 관리 창(`pywebview`, WebView2)은 macOS와 동일한 코드를 사용합니다.
 - **Windows 11(빌드 10.0.26200)에서 빌드 및 실행을 검증했습니다.** `pip install -e ".[build,test]"`,
-  `pytest`(75건 통과), 개발 모드 실행(Mac의 mock-api에 LAN으로 연결해 페어링·READY 확인),
+  `pytest`(현재 213건 통과), 개발 모드 실행(Mac의 mock-api에 LAN으로 연결해 페어링·READY 확인),
   `pyinstaller slash_pc_runner_windows.spec` 빌드까지 모두 확인했습니다. 현재 `hiddenimports`
   목록만으로 빌드가 성공하며 추가 조정은 필요하지 않습니다. 트레이 아이콘 툴팁과 작업표시줄
   컨텍스트 메뉴 모두 "Slash"로 표시되며, 단일 인스턴스 락(`SlashTray` named mutex)도 이름 변경
