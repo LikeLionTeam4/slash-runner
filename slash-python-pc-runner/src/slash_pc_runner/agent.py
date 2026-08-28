@@ -1,4 +1,4 @@
-"""로컬 에이전트 핵심 — agent.ts(ContractPcRunner) 대응.
+"""로컬 에이전트 핵심 — agent.ts(ContractPcRunner) 대응 (Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸).
 
 TS는 단일 이벤트루프 기반이라 async/await로 동시성을 표현하지만, Python은 동기 WSS
 클라이언트(websockets.sync.client)를 쓰므로 연결 루프를 백그라운드 스레드로 돌린다.

@@ -1,4 +1,4 @@
-"""HTTP 페어링/토큰 갱신 — pairingClient.ts 대응."""
+"""HTTP 페어링/토큰 갱신 — pairingClient.ts 대응 (Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""다중 검색 폴더 색인 — fileIndexStore.ts 1:1 대응.
+"""다중 검색 폴더 색인 — fileIndexStore.ts 1:1 대응 (Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸).
 
 파일명은 SQLite(표준 sqlite3 모듈) + FTS5(trigram)로, 변경 감시는 watchdog로 증분 반영한다.
 better-sqlite3(Node)에 해당하는 서드파티 네이티브 확장 대신 표준 sqlite3를 쓰고, watchdog도

@@ -1,4 +1,5 @@
-"""개발용 CLI 진입점 — cli.ts 대응. `python -m slash_pc_runner.cli`로 실행."""
+"""개발용 CLI 진입점 — cli.ts(Electron/TypeScript 시절 원본, 저장소 Python
+재작성으로 소멸) 대응. `python -m slash_pc_runner.cli`로 실행."""
 
 from __future__ import annotations
 

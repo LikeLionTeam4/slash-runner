@@ -1,4 +1,5 @@
-"""SYSTEM_STATUS 작업 실행 — systemStatus.ts 대응. 이 실기기의 CPU/메모리/디스크 실측값."""
+"""SYSTEM_STATUS 작업 실행 — systemStatus.ts(Electron/TypeScript 시절 원본, 저장소
+Python 재작성으로 소멸) 대응. 이 실기기의 CPU/메모리/디스크 실측값."""
 
 from __future__ import annotations
 

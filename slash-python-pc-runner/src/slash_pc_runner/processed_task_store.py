@@ -1,4 +1,4 @@
-"""중복방지·재전송 이력(processed_tasks) 영속화 — processedTaskStore.ts 대응.
+"""중복방지·재전송 이력(processed_tasks) 영속화 — processedTaskStore.ts 대응 (Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸).
 
 처리 이력은 자격증명이 아니라 서버에 이미 전송된 결과값이라 평문 JSON 파일로 충분하다.
 """

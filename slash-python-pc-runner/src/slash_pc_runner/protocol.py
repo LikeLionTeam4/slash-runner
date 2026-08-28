@@ -1,4 +1,4 @@
-"""Agent WSS 메시지 프로토콜 상수·헬퍼 — contracts/src/agentMessages.ts·enums.ts 대응."""
+"""Agent WSS 메시지 프로토콜 상수·헬퍼 — contracts/src/agentMessages.ts·enums.ts 대응 (Electron/TypeScript 시절 원본, 저장소 Python 재작성으로 소멸)."""
 
 from __future__ import annotations
 
